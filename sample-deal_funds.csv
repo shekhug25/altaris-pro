@@ -1,0 +1,4 @@
+deal_id,deal_name,fund_id,fund_name,role,status,commitment_m
+,Project Alpha,,Fund One,Lead,Proposed,10
+,Project Alpha,,Fund Two,Participant,SoftCircled,5
+,Project Beta,,Fund Three,Lead,Committed,15

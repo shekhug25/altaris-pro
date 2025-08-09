@@ -1,0 +1,3 @@
+name,deal_type,stage,source,currency,size_m,sector
+Project Alpha,DirectLending,preliminary,Company A,USD,25,Healthcare
+Project Beta,CoInvest,active,Company B,EUR,15,Technology

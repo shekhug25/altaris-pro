@@ -1,0 +1,19 @@
+{
+  "name": "altaris-pro",
+  "private": true,
+  "version": "5.4.0",
+  "type": "module",
+  "scripts": {
+    "lint": "eslint .",
+    "format:check": "prettier --check \"**/*.{js,ts,json,md,yml,yaml}\"",
+    "test": "node tests/csv.spec.mjs"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "eslint-config-standard": "^17.1.0",
+    "eslint-plugin-import": "^2.29.1",
+    "eslint-plugin-n": "^16.6.2",
+    "eslint-plugin-promise": "^6.1.1",
+    "prettier": "^3.3.3"
+  }
+}

@@ -1,5 +1,9 @@
-// ---- Supabase Init ----
-const client = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+// ---- Supabase or Demo Mode ----
+let client = null;
+if (!window.DEMO_MODE) {
+  client = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+}
+const DEMO_KEY = 'altaris-demo-data-v54';
 
 // ---- Edit-safe refresh ----
 let editing=false, editTimer=null;
@@ -56,7 +60,7 @@ function downloadFile(name, text){
   URL.revokeObjectURL(a.href);
 }
 
-// ---- Charts (no deps) ----
+// ---- Charts (no libs) ----
 function drawBarChart(canvas, labels, data) {
   const ctx = canvas.getContext('2d');
   const w = canvas.width, h = canvas.height;
@@ -143,17 +147,57 @@ const Guards = {
   }
 };
 
-// ---- Data access ----
-async function loadDeals(){ const { data } = await client.from('deals').select('*').order('id'); return data||[]; }
-async function insertDeals(rows){ const { data, error } = await client.from('deals').insert(rows).select(); if(error){throw error;} return data; }
-async function insertDeal(row){ const { data, error } = await client.from('deals').insert(row).select().single(); if(error){alert(error.message);return null;} return data; }
-async function updateDeal(row){ const { data, error } = await client.from('deals').update(row).eq('id', row.id).select().single(); if(error){alert(error.message);return null;} return data; }
-async function loadFunds(){ const { data } = await client.from('funds').select('*').order('name'); return data||[]; }
-async function loadDealFunds(){ const { data } = await client.from('deal_funds').select('*').order('deal_id'); return data||[]; }
-async function insertDealFunds(rows){ const { data, error } = await client.from('deal_funds').insert(rows).select(); if(error){throw error;} return data; }
-async function insertDealFund(row){ const { data, error } = await client.from('deal_funds').insert(row).select().single(); if(error){alert(error.message);return null;} return data; }
-async function updateDealFund(row){ const { data, error } = await client.from('deal_funds').update(row).eq('id', row.id).select().single(); if(error){alert(error.message);return null;} return data; }
-async function deleteDealFund(id){ const { error } = await client.from('deal_funds').delete().eq('id', id); if(error){alert(error.message);return false;} return true; }
+// ---- Data access (DB or Demo) ----
+async function loadDeals(){ 
+  if (window.DEMO_MODE) return JSON.parse(localStorage.getItem(DEMO_KEY)||'{"deals":[]}').deals;
+  const { data } = await client.from('deals').select('*').order('id'); return data||[]; 
+}
+async function insertDeal(row){ 
+  if (window.DEMO_MODE) {
+    const s = JSON.parse(localStorage.getItem(DEMO_KEY)||'{"deals":[]}');
+    const id = Date.now(); s.deals.push({ ...row, id }); localStorage.setItem(DEMO_KEY, JSON.stringify(s)); 
+    return { ...row, id };
+  }
+  const { data, error } = await client.from('deals').insert(row).select().single(); if(error){alert(error.message);return null;} return data; 
+}
+async function updateDeal(row){ 
+  if (window.DEMO_MODE) {
+    const s = JSON.parse(localStorage.getItem(DEMO_KEY)||'{"deals":[]}');
+    s.deals = s.deals.map(d=> d.id===row.id ? { ...d, ...row } : d); localStorage.setItem(DEMO_KEY, JSON.stringify(s));
+    return row;
+  }
+  const { data, error } = await client.from('deals').update(row).eq('id', row.id).select().single(); if(error){alert(error.message);return null;} return data; 
+}
+async function loadFunds(){ 
+  if (window.DEMO_MODE) return [{id:1,name:'Fund One'},{id:2,name:'Fund Two'},{id:3,name:'Fund Three'}];
+  const { data } = await client.from('funds').select('*').order('name'); return data||[]; 
+}
+async function loadDealFunds(){ 
+  if (window.DEMO_MODE) return JSON.parse(localStorage.getItem(DEMO_KEY)||'{"parts":[]}').parts||[];
+  const { data } = await client.from('deal_funds').select('*').order('deal_id'); return data||[]; 
+}
+async function insertDealFund(row){ 
+  if (window.DEMO_MODE) {
+    const s = JSON.parse(localStorage.getItem(DEMO_KEY)||'{"deals":[],"parts":[]}');
+    const id = Date.now(); s.parts.push({ ...row, id }); localStorage.setItem(DEMO_KEY, JSON.stringify(s));
+    return { ...row, id };
+  }
+  const { data, error } = await client.from('deal_funds').insert(row).select().single(); if(error){alert(error.message);return null;} return data; 
+}
+async function updateDealFund(row){ 
+  if (window.DEMO_MODE) {
+    const s = JSON.parse(localStorage.getItem(DEMO_KEY)||'{"parts":[]}');
+    s.parts = (s.parts||[]).map(p=> p.id===row.id ? { ...p, ...row } : p); localStorage.setItem(DEMO_KEY, JSON.stringify(s));
+    return row;
+  }
+  const { data, error } = await client.from('deal_funds').update(row).eq('id', row.id).select().single(); if(error){alert(error.message);return null;} return data; 
+}
+async function deleteDealFund(id){ 
+  if (window.DEMO_MODE) {
+    const s = JSON.parse(localStorage.getItem(DEMO_KEY)||'{"parts":[]}'); s.parts = (s.parts||[]).filter(p=>p.id!==id); localStorage.setItem(DEMO_KEY, JSON.stringify(s)); return true;
+  }
+  const { error } = await client.from('deal_funds').delete().eq('id', id); if(error){alert(error.message);return false;} return true; 
+}
 
 // ---- UI helpers ----
 const qs = (s, el=document)=>el.querySelector(s);
@@ -297,7 +341,27 @@ function renderCharts(deals){
   drawDoughnutChart(document.getElementById("chartType"), Object.keys(by.byType), Object.values(by.byType));
 }
 
-// ---- Import logic ----
+// ---- CSV Import/Export ----
+async function exportCSVs(){
+  const [deals, funds, parts] = await Promise.all([loadDeals(), loadFunds(), loadDealFunds()]);
+  const fundById = Object.fromEntries(funds.map(f=>[f.id, f]));
+  const ts = new Date().toISOString().replace(/[:.]/g,'-');
+
+  const dealsRows = deals.map(d=> ({
+    id: d.id, name: d.name, deal_type: d.deal_type || '', stage: d.stage,
+    source: d.source || '', currency: d.currency || 'USD', size_m: d.size || 0,
+    sector: d.sector || '', created_at: d.created_at || ''
+  }));
+  downloadFile(`deals-${ts}.csv`, toCSV(dealsRows));
+
+  const partRows = parts.map(p=> ({
+    id: p.id, deal_id: p.deal_id, fund_id: p.fund_id,
+    fund_name: (fundById[p.fund_id]?.name) || '', role: p.role || '',
+    status: p.status || '', commitment_m: p.commitment || 0, created_at: p.created_at || ''
+  }));
+  downloadFile(`deal_funds-${ts}.csv`, toCSV(partRows));
+}
+
 function detectType(rows){
   const keys = new Set(Object.keys(rows[0]||{}).map(k=>k.toLowerCase()));
   const hasDealFunds = keys.has('deal_id') || keys.has('deal_name') || keys.has('fund_id') || keys.has('fund_name');
@@ -340,40 +404,13 @@ async function importRows(rows){
     const payload = rows.map(normalizeDeal).filter(d=>d.name && d.stage);
     if(!payload.length) throw new Error('No valid deal rows detected.');
     if(!confirm(`Import ${payload.length} deals?`)) return 0;
-    const chunks = []; for(let i=0;i<payload.length;i+=200) chunks.push(payload.slice(i,i+200));
-    let total=0;
-    for(const ch of chunks){ const res = await insertDeals(ch); total+=res.length; }
-    return total;
+    return (await Promise.all(payload.map(insertDeal))).length;
   } else {
     const payload = await normalizeDealFunds(rows);
     if(!payload.length) throw new Error('No valid deal_funds rows detected (need deal_id/deal_name and fund_id/fund_name).');
     if(!confirm(`Import ${payload.length} participations?`)) return 0;
-    const chunks = []; for(let i=0;i<payload.length;i+=200) chunks.push(payload.slice(i,i+200));
-    let total=0;
-    for(const ch of chunks){ const res = await insertDealFunds(ch); total+=res.length; }
-    return total;
+    return (await Promise.all(payload.map(insertDealFund))).length;
   }
-}
-
-// ---- Export ----
-async function exportCSVs(){
-  const [deals, funds, parts] = await Promise.all([loadDeals(), loadFunds(), loadDealFunds()]);
-  const fundById = Object.fromEntries(funds.map(f=>[f.id, f]));
-  const ts = new Date().toISOString().replace(/[:.]/g,'-');
-
-  const dealsRows = deals.map(d=> ({
-    id: d.id, name: d.name, deal_type: d.deal_type || '', stage: d.stage,
-    source: d.source || '', currency: d.currency || 'USD', size_m: d.size || 0,
-    sector: d.sector || '', created_at: d.created_at || ''
-  }));
-  downloadFile(`deals-${ts}.csv`, toCSV(dealsRows));
-
-  const partRows = parts.map(p=> ({
-    id: p.id, deal_id: p.deal_id, fund_id: p.fund_id,
-    fund_name: (fundById[p.fund_id]?.name) || '', role: p.role || '',
-    status: p.status || '', commitment_m: p.commitment || 0, created_at: p.created_at || ''
-  }));
-  downloadFile(`deal_funds-${ts}.csv`, toCSV(partRows));
 }
 
 // ---- Controller ----

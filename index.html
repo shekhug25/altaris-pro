@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Altaris — Deal Pipeline (Pro v5.3, Supabase + Funds)</title>
+  <title>Altaris — Deal Pipeline (v5.4)</title>
   <style>
     :root { --bg:#1b1b1b; --fg:#f0f0f0; --panel:#2a2a2a; --line:#333; --card:#1f1f1f; --accent:#4ea3ff; }
     *{box-sizing:border-box}
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; background: var(--bg); color: var(--fg); }
-    header { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; background: #222; }
+    header { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; background: #222; position: sticky; top:0; z-index: 5; }
     .actions { display:flex; gap:8px; align-items:center; }
     button { background: var(--accent); border: none; color: white; padding: 6px 12px; border-radius: 4px; cursor: pointer; }
     button:hover { filter: brightness(0.9); }
@@ -44,7 +44,7 @@
   <header>
     <div>
       <div style="font-size:20px; font-weight:700;">Altaris — Deal Pipeline</div>
-      <div style="font-size:12px; opacity:.7;">Pro v5.3 (Shared via Supabase + Funds, Import/Export)</div>
+      <div style="font-size:12px; opacity:.7;">v5.4 (Funds, Charts, Import/Export, Notifications-ready)</div>
     </div>
     <div class="actions">
       <input type="file" id="file" accept=".csv" style="display:none" />

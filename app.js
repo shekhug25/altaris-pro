@@ -3,7 +3,7 @@ let client = null;
 if (!window.DEMO_MODE) {
   client = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
 }
-const DEMO_KEY = 'altaris-demo-data-v54';
+const DEMO_KEY = 'altaris-demo-data-v57';
 
 // ---- Edit-safe refresh ----
 let editing=false, editTimer=null;
@@ -66,45 +66,56 @@ function drawBarChart(canvas, labels, data, highlightKey=null) {
   const ctx = canvas.getContext('2d');
   const w = canvas.width, h = canvas.height;
   ctx.clearRect(0,0,w,h);
-  const margin = 28, barGap = 10;
+  const marginLeft = 36, marginBottom = 32, marginTop = 14, marginRight = 12;
+  const barGap = 10;
   const max = Math.max(1, ...data);
-  const chartW = w - margin*2, chartH = h - margin*2;
+  const chartW = w - marginLeft - marginRight, chartH = h - marginTop - marginBottom;
   const barW = Math.max(8, (chartW - (labels.length-1)*barGap) / labels.length);
+  // axes
   ctx.strokeStyle = '#555'; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(margin, h-margin); ctx.lineTo(w-margin, h-margin); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(margin, margin); ctx.lineTo(margin, h-margin); ctx.stroke();
-  let x = margin;
+  ctx.beginPath(); ctx.moveTo(marginLeft, h-marginBottom); ctx.lineTo(w-marginRight, h-marginBottom); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(marginLeft, marginTop); ctx.lineTo(marginLeft, h-marginBottom); ctx.stroke();
+  // bars
+  let x = marginLeft;
   const areas = [];
   labels.forEach((lab, i) => {
     const val = data[i]||0;
-    const bh = (val / max) * (chartH-10);
-    const y = h - margin - bh;
+    const bh = (val / max) * (chartH-8);
+    const y = h - marginBottom - bh;
     ctx.fillStyle = (highlightKey && highlightKey===lab) ? '#79bdff' : '#4ea3ff';
     ctx.fillRect(x, y, barW, bh);
-    ctx.fillStyle = '#ccc'; ctx.font = '10px system-ui';
-    ctx.textAlign = 'center'; ctx.fillText(lab, x + barW/2, h - margin + 12);
+    // label
+    ctx.fillStyle = '#ccc'; ctx.font = '11px system-ui';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.fillText(lab.replace(/_/g,' ').replace(/\b\w/g, m=>m.toUpperCase()), x + barW/2, h - marginBottom + 4);
     areas.push({ x, y, w: barW, h: bh, key: lab });
     x += barW + barGap;
   });
   return areas;
 }
 
-
 function drawDoughnutChart(canvas, labels, data, highlightKey=null) {
   const ctx = canvas.getContext('2d');
   const w = canvas.width, h = canvas.height;
   ctx.clearRect(0,0,w,h);
-  const cx = w/2, cy = h/2, r = Math.min(w,h)/2 - 15, innerR = r * 0.6;
+  // Reserve legend column
+  const legendW = 130;
+  const availW = w - legendW;
+  const size = Math.min(availW, h) - 20;
+  const cx = Math.floor((availW)/2);
+  const cy = Math.floor(h/2);
+  const r = Math.floor(size/2);
+  const innerR = Math.floor(r * 0.6);
   const total = data.reduce((a,b)=>a+b,0) || 1;
   const colors = ['#4ea3ff','#28a745','#ffc107','#dc3545','#6f42c1','#17a2b8','#ff7f50','#9acd32'];
   let start = -Math.PI/2;
   const areas = [];
   function lighten(hex, amt){
     const c = parseInt(hex.slice(1), 16);
-    const r = Math.min(255, ((c>>16)&255) + Math.round(255*amt));
-    const g = Math.min(255, ((c>>8)&255) + Math.round(255*amt));
-    const b = Math.min(255, (c&255) + Math.round(255*amt));
-    return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1);
+    const rr = Math.min(255, ((c>>16)&255) + Math.round(255*amt));
+    const gg = Math.min(255, ((c>>8)&255) + Math.round(255*amt));
+    const bb = Math.min(255, (c&255) + Math.round(255*amt));
+    return '#'+((1<<24)+(rr<<16)+(gg<<8)+bb).toString(16).slice(1);
   }
   labels.forEach((lab, i) => {
     const val = data[i]||0;
@@ -117,21 +128,22 @@ function drawDoughnutChart(canvas, labels, data, highlightKey=null) {
     areas.push({ start, end: start+ang, cx, cy, r, innerR, key: lab });
     start += ang;
   });
+  // cut hole
   ctx.globalCompositeOperation = 'destination-out';
   ctx.beginPath(); ctx.arc(cx, cy, innerR, 0, Math.PI*2); ctx.fill();
   ctx.globalCompositeOperation = 'source-over';
-  ctx.font = '11px system-ui'; ctx.fillStyle = '#ddd'; ctx.textAlign='left';
-  let y = 16;
+  // legend
+  ctx.font = '12px system-ui'; ctx.fillStyle = '#ddd'; ctx.textAlign='left'; ctx.textBaseline='middle';
+  let y = 18;
   labels.forEach((lab, i)=>{
     ctx.fillStyle = colors[i % colors.length];
-    ctx.fillRect(w-120, y-8, 10, 10);
+    ctx.fillRect(availW + 12, y-6, 10, 10);
     ctx.fillStyle = '#ddd';
-    ctx.fillText(`${lab}: ${data[i]||0}`, w-105, y);
-    y += 16;
+    ctx.fillText(`${lab}: ${data[i]||0}`, availW + 28, y);
+    y += 18;
   });
   return areas;
 }
-
 
 // ---- Model ----
 const Stages = {
@@ -168,7 +180,7 @@ const Guards = {
 
 // ---- Data access (DB or Demo) ----
 async function loadDeals(){ 
-  if (window.DEMO_MODE) return JSON.parse(localStorage.getItem(DEMO_KEY)||'{"deals":[]}').deals;
+  if (window.DEMO_MODE) return JSON.parse(localStorage.getItem(DEMO_KEY)||'{"deals":[]}').deals || [];
   const { data } = await client.from('deals').select('*').order('id'); return data||[]; 
 }
 async function insertDeal(row){ 
@@ -218,9 +230,9 @@ async function deleteDealFund(id){
   const { error } = await client.from('deal_funds').delete().eq('id', id); if(error){alert(error.message);return false;} return true; 
 }
 
-
-// ---- Filters (chart -> board) ----
+// ---- Filters + Search (chart -> board) ----
 const activeFilter = { stage: null, type: null };
+let searchQuery = '';
 let areasStage = [];
 let areasType = [];
 
@@ -237,13 +249,24 @@ function clearFilter(kind) {
 function clearAllFilters() {
   activeFilter.stage = null;
   activeFilter.type = null;
+  searchQuery = '';
+  const sb = document.getElementById('searchBox'); if (sb) sb.value = '';
   renderFilterBar();
   renderBoard(filteredDeals(), move, currentFunds, indexDealFunds(currentDealFunds));
 }
+
+function searchMatches(d){
+  if(!searchQuery) return true;
+  const q = searchQuery.toLowerCase();
+  return [d.name, d.source, d.deal_type, d.sector, d.currency]
+    .filter(Boolean).some(v => String(v).toLowerCase().includes(q));
+}
+
 function filteredDeals() {
   return currentDeals.filter(d =>
     (!activeFilter.stage || d.stage === activeFilter.stage) &&
-    (!activeFilter.type  || d.deal_type === activeFilter.type)
+    (!activeFilter.type  || d.deal_type === activeFilter.type) &&
+    searchMatches(d)
   );
 }
 function renderFilterBar() {
@@ -259,7 +282,10 @@ function renderFilterBar() {
     chips.push(el('span', { className:'chip', innerText:`Type: ${activeFilter.type}` }));
     chips.push(el('button', { innerText:'Clear type', onclick:()=>clearFilter('type') }));
   }
-  if (!activeFilter.stage && !activeFilter.type) {
+  if (searchQuery) {
+    chips.push(el('span', { className:'chip', innerText:`Search: “${searchQuery}”` }));
+  }
+  if (!activeFilter.stage && !activeFilter.type && !searchQuery) {
     chips.push(el('span', { className:'light', innerText:'No filters' }));
   } else {
     chips.push(el('button', { innerText:'Clear all', onclick:clearAllFilters }));
@@ -277,7 +303,7 @@ const el = (tag, props={}, children=[]) => {
   });
   return node;
 };
-function stageLabel(s){ return s.replace("_", " "); }
+function stageLabel(s){ return s.replace(/_/g, " "); }
 function metrics(deals){
   return deals.reduce((acc,d)=>{
     acc.byStage[d.stage]=(acc.byStage[d.stage]||0)+1;
@@ -402,7 +428,6 @@ function renderBoard(deals, onMove, funds, dealFundsMap){
   });
 }
 
-
 let chartHandlersBound = false;
 function canvasPoint(canvas, evt){
   const rect = canvas.getBoundingClientRect();
@@ -458,7 +483,6 @@ function renderCharts(deals){
     });
   }
 }
-
 
 // ---- CSV Import/Export ----
 async function exportCSVs(){
@@ -560,7 +584,7 @@ async function move(deal, to){
   if (saved) refresh();
 }
 
-// Add deal + Import/Export bindings
+// Add deal + Import/Export bindings + Search
 document.addEventListener('DOMContentLoaded', ()=>{
   document.getElementById("add").onclick = async () => {
     const name = qs("#name").value.trim(); if(!name) return alert("Deal name required");
@@ -593,6 +617,20 @@ document.addEventListener('DOMContentLoaded', ()=>{
   drop.ondragleave = ()=> drop.classList.remove('drag');
   drop.ondrop = (e)=>{ e.preventDefault(); drop.classList.remove('drag'); handleFiles(e.dataTransfer.files); };
   document.getElementById('export').onclick = exportCSVs;
+
+  // Search
+  const sb = document.getElementById('searchBox');
+  const clearBtn = document.getElementById('clearSearch');
+  if (sb) {
+    sb.addEventListener('input', () => {
+      searchQuery = sb.value.trim();
+      renderFilterBar();
+      renderBoard(filteredDeals(), move, currentFunds, indexDealFunds(currentDealFunds));
+    });
+  }
+  if (clearBtn) {
+    clearBtn.onclick = () => { searchQuery=''; sb.value=''; renderFilterBar(); renderBoard(filteredDeals(), move, currentFunds, indexDealFunds(currentDealFunds)); };
+  }
 
   async function handleFiles(files){
     const f = files[0]; if(!f) return;

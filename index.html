@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Altaris — Deal Pipeline (v5.4)</title>
+  <title>Altaris — Deal Pipeline (v5.7)</title>
   <style>
     :root { --bg:#1b1b1b; --fg:#f0f0f0; --panel:#2a2a2a; --line:#333; --card:#1f1f1f; --accent:#4ea3ff; }
     *{box-sizing:border-box}
@@ -36,6 +36,9 @@
     .drop.drag { border-color:#4ea3ff; color:#fff; }
     .err { color:#ff7b7b; font-size:12px; }
     .ok { color:#9acd32; font-size:12px; }
+    .filters { display:flex; gap:8px; align-items:center; margin: 6px 0 2px 0; flex-wrap: wrap; }
+    .search { display:flex; gap:6px; align-items:center; }
+    .search input { background:#333; color:#fff; border:1px solid #555; border-radius:4px; padding:6px 8px; min-width:220px; }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js"></script>
@@ -44,7 +47,7 @@
   <header>
     <div>
       <div style="font-size:20px; font-weight:700;">Altaris — Deal Pipeline</div>
-      <div style="font-size:12px; opacity:.7;">v5.4 (Funds, Charts, Import/Export, Notifications-ready)</div>
+      <div style="font-size:12px; opacity:.7;">v5.7 (Search bar, chart label + legend fixes)</div>
     </div>
     <div class="actions">
       <input type="file" id="file" accept=".csv" style="display:none" />
@@ -73,10 +76,18 @@
     <div id="importStatus" class="light"></div>
     <section class="stats" id="stats"></section>
     <section class="charts">
-      <canvas id="chartStage" width="340" height="220"></canvas>
-      <canvas id="chartType" width="340" height="220"></canvas>
+      <canvas id="chartStage" width="380" height="240"></canvas>
+      <canvas id="chartType" width="380" height="240"></canvas>
     </section>
-    <div id="filterBar" class="fund-row" style="margin-top:4px;"></div>
+
+    <div class="filters">
+      <div id="filterBar" class="fund-row"></div>
+      <div class="search">
+        <input id="searchBox" placeholder="Search deals…" />
+        <button id="clearSearch">Clear search</button>
+      </div>
+    </div>
+
     <section class="board" id="board"></section>
   </div>
 

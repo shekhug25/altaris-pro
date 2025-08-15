@@ -24,7 +24,7 @@ function parseCSV(text){
       if(ch===','){ row.push(cur); cur=''; i++; continue; }
       if(ch==='\n' || ch==='\r'){ 
         if(cur.length||row.length){ row.push(cur); rows.push(row); row=[]; cur=''; }
-        if(ch==='\r' && text[i+1]==='\n') i+=2; else i++;
+        if(ch==='\r' && text[i+1]=='\n') i+=2; else i++;
         continue;
       }
       cur+=ch; i++; continue;
@@ -61,7 +61,8 @@ function downloadFile(name, text){
 }
 
 // ---- Charts (no libs) ----
-function drawBarChart(canvas, labels, data) {
+
+function drawBarChart(canvas, labels, data, highlightKey=null) {
   const ctx = canvas.getContext('2d');
   const w = canvas.width, h = canvas.height;
   ctx.clearRect(0,0,w,h);
@@ -73,19 +74,23 @@ function drawBarChart(canvas, labels, data) {
   ctx.beginPath(); ctx.moveTo(margin, h-margin); ctx.lineTo(w-margin, h-margin); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(margin, margin); ctx.lineTo(margin, h-margin); ctx.stroke();
   let x = margin;
-  ctx.fillStyle = '#4ea3ff';
+  const areas = [];
   labels.forEach((lab, i) => {
     const val = data[i]||0;
     const bh = (val / max) * (chartH-10);
     const y = h - margin - bh;
+    ctx.fillStyle = (highlightKey && highlightKey===lab) ? '#79bdff' : '#4ea3ff';
     ctx.fillRect(x, y, barW, bh);
     ctx.fillStyle = '#ccc'; ctx.font = '10px system-ui';
     ctx.textAlign = 'center'; ctx.fillText(lab, x + barW/2, h - margin + 12);
-    ctx.fillStyle = '#4ea3ff';
+    areas.push({ x, y, w: barW, h: bh, key: lab });
     x += barW + barGap;
   });
+  return areas;
 }
-function drawDoughnutChart(canvas, labels, data) {
+
+
+function drawDoughnutChart(canvas, labels, data, highlightKey=null) {
   const ctx = canvas.getContext('2d');
   const w = canvas.width, h = canvas.height;
   ctx.clearRect(0,0,w,h);
@@ -93,11 +98,23 @@ function drawDoughnutChart(canvas, labels, data) {
   const total = data.reduce((a,b)=>a+b,0) || 1;
   const colors = ['#4ea3ff','#28a745','#ffc107','#dc3545','#6f42c1','#17a2b8','#ff7f50','#9acd32'];
   let start = -Math.PI/2;
-  data.forEach((val, i) => {
+  const areas = [];
+  function lighten(hex, amt){
+    const c = parseInt(hex.slice(1), 16);
+    const r = Math.min(255, ((c>>16)&255) + Math.round(255*amt));
+    const g = Math.min(255, ((c>>8)&255) + Math.round(255*amt));
+    const b = Math.min(255, (c&255) + Math.round(255*amt));
+    return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1);
+  }
+  labels.forEach((lab, i) => {
+    const val = data[i]||0;
     const ang = (val/total) * Math.PI*2;
     ctx.beginPath(); ctx.moveTo(cx, cy);
     ctx.arc(cx, cy, r, start, start+ang); ctx.closePath();
-    ctx.fillStyle = colors[i % colors.length]; ctx.fill();
+    const base = colors[i % colors.length];
+    ctx.fillStyle = (highlightKey && highlightKey===lab) ? lighten(base, 0.18) : base;
+    ctx.fill();
+    areas.push({ start, end: start+ang, cx, cy, r, innerR, key: lab });
     start += ang;
   });
   ctx.globalCompositeOperation = 'destination-out';
@@ -112,7 +129,9 @@ function drawDoughnutChart(canvas, labels, data) {
     ctx.fillText(`${lab}: ${data[i]||0}`, w-105, y);
     y += 16;
   });
+  return areas;
 }
+
 
 // ---- Model ----
 const Stages = {
@@ -199,6 +218,54 @@ async function deleteDealFund(id){
   const { error } = await client.from('deal_funds').delete().eq('id', id); if(error){alert(error.message);return false;} return true; 
 }
 
+
+// ---- Filters (chart -> board) ----
+const activeFilter = { stage: null, type: null };
+let areasStage = [];
+let areasType = [];
+
+function setFilter(kind, value) {
+  activeFilter[kind] = (activeFilter[kind] === value ? null : value);
+  renderFilterBar();
+  renderBoard(filteredDeals(), move, currentFunds, indexDealFunds(currentDealFunds));
+}
+function clearFilter(kind) {
+  activeFilter[kind] = null;
+  renderFilterBar();
+  renderBoard(filteredDeals(), move, currentFunds, indexDealFunds(currentDealFunds));
+}
+function clearAllFilters() {
+  activeFilter.stage = null;
+  activeFilter.type = null;
+  renderFilterBar();
+  renderBoard(filteredDeals(), move, currentFunds, indexDealFunds(currentDealFunds));
+}
+function filteredDeals() {
+  return currentDeals.filter(d =>
+    (!activeFilter.stage || d.stage === activeFilter.stage) &&
+    (!activeFilter.type  || d.deal_type === activeFilter.type)
+  );
+}
+function renderFilterBar() {
+  const bar = document.getElementById('filterBar');
+  if (!bar) return;
+  bar.innerHTML = '';
+  const chips = [];
+  if (activeFilter.stage) {
+    chips.push(el('span', { className:'chip', innerText:`Stage: ${stageLabel(activeFilter.stage)}` }));
+    chips.push(el('button', { innerText:'Clear stage', onclick:()=>clearFilter('stage') }));
+  }
+  if (activeFilter.type) {
+    chips.push(el('span', { className:'chip', innerText:`Type: ${activeFilter.type}` }));
+    chips.push(el('button', { innerText:'Clear type', onclick:()=>clearFilter('type') }));
+  }
+  if (!activeFilter.stage && !activeFilter.type) {
+    chips.push(el('span', { className:'light', innerText:'No filters' }));
+  } else {
+    chips.push(el('button', { innerText:'Clear all', onclick:clearAllFilters }));
+  }
+  chips.forEach(c => bar.appendChild(c));
+}
 // ---- UI helpers ----
 const qs = (s, el=document)=>el.querySelector(s);
 const el = (tag, props={}, children=[]) => {
@@ -335,11 +402,63 @@ function renderBoard(deals, onMove, funds, dealFundsMap){
   });
 }
 
+
+let chartHandlersBound = false;
+function canvasPoint(canvas, evt){
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+  return { x: (evt.clientX - rect.left) * scaleX, y: (evt.clientY - rect.top) * scaleY };
+}
 function renderCharts(deals){
   const by = metrics(deals);
-  drawBarChart(document.getElementById("chartStage"), Object.keys(by.byStage), Object.values(by.byStage));
-  drawDoughnutChart(document.getElementById("chartType"), Object.keys(by.byType), Object.values(by.byType));
+  const stageCanvas = document.getElementById("chartStage");
+  const typeCanvas  = document.getElementById("chartType");
+
+  areasStage = drawBarChart(
+    stageCanvas,
+    Object.keys(by.byStage),
+    Object.values(by.byStage),
+    activeFilter.stage
+  );
+
+  areasType = drawDoughnutChart(
+    typeCanvas,
+    Object.keys(by.byType),
+    Object.values(by.byType),
+    activeFilter.type
+  );
+
+  if (!chartHandlersBound) {
+    chartHandlersBound = true;
+
+    stageCanvas.addEventListener('click', (e)=>{
+      const p = canvasPoint(stageCanvas, e);
+      const hit = areasStage.find(a => p.x>=a.x && p.x<=a.x+a.w && p.y>=a.y && p.y<=a.y+a.h);
+      if (hit) setFilter('stage', hit.key);
+      else clearFilter('stage');
+      renderCharts(currentDeals);
+    });
+
+    typeCanvas.addEventListener('click', (e)=>{
+      const p = canvasPoint(typeCanvas, e);
+      const hit = areasType.find(s => {
+        const dx = p.x - s.cx, dy = p.y - s.cy;
+        const R = Math.hypot(dx, dy);
+        if (R < s.innerR || R > s.r) return false;
+        let ang = Math.atan2(dy, dx);
+        if (ang < -Math.PI/2) ang += Math.PI*2;
+        const within = (ang >= s.start && ang <= s.end) ||
+                       (s.end < s.start && (ang >= s.start || ang <= s.end));
+        return within;
+      });
+      if (hit) setFilter('type', hit.key);
+      else clearFilter('type');
+      renderCharts(currentDeals);
+    });
+  }
 }
+
 
 // ---- CSV Import/Export ----
 async function exportCSVs(){
@@ -423,9 +542,10 @@ async function refresh(){
   currentDeals = deals; currentFunds = funds; currentDealFunds = df;
   renderStats(currentDeals);
   if (!editing) {
-    renderBoard(currentDeals, move, currentFunds, indexDealFunds(currentDealFunds));
+    renderBoard(filteredDeals(), move, currentFunds, indexDealFunds(currentDealFunds));
   }
   renderCharts(currentDeals);
+  renderFilterBar();
 }
 
 async function move(deal, to){

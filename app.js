@@ -1,16 +1,17 @@
-// ---- Supabase or Demo Mode ----
+// ========================== Altaris Deal Pipeline — app.js ==========================
 let client = null;
 if (!window.DEMO_MODE) {
   client = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
 }
-const DEMO_KEY = 'altaris-demo-data-v57';
+const DEMO_KEY = 'altaris-demo-data-v59';
+console.log(`[Altaris] Mode=${window.DEMO_MODE ? 'DEMO' : (client ? 'SUPABASE' : 'NO_CLIENT')}`);
 
-// ---- Edit-safe refresh ----
+// ----------------------------- Edit-safe refresh -----------------------------------
 let editing=false, editTimer=null;
 function beginEdit(){ editing=true; if(editTimer) clearTimeout(editTimer); }
 function endEditSoon(){ if(editTimer) clearTimeout(editTimer); editTimer=setTimeout(()=>{ editing=false; refresh(); }, 1200); }
 
-// ---- CSV helpers ----
+// -------------------------------- CSV helpers -------------------------------------
 function parseCSV(text){
   const rows = []; let i=0, cur='', inq=false, row=[];
   while(i<text.length){
@@ -60,8 +61,7 @@ function downloadFile(name, text){
   URL.revokeObjectURL(a.href);
 }
 
-// ---- Charts (no libs) ----
-
+// --------------------------------- Charts -----------------------------------------
 function drawBarChart(canvas, labels, data, highlightKey=null) {
   const ctx = canvas.getContext('2d');
   const w = canvas.width, h = canvas.height;
@@ -71,11 +71,9 @@ function drawBarChart(canvas, labels, data, highlightKey=null) {
   const max = Math.max(1, ...data);
   const chartW = w - marginLeft - marginRight, chartH = h - marginTop - marginBottom;
   const barW = Math.max(8, (chartW - (labels.length-1)*barGap) / labels.length);
-  // axes
   ctx.strokeStyle = '#555'; ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(marginLeft, h-marginBottom); ctx.lineTo(w-marginRight, h-marginBottom); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(marginLeft, marginTop); ctx.lineTo(marginLeft, h-marginBottom); ctx.stroke();
-  // bars
   let x = marginLeft;
   const areas = [];
   labels.forEach((lab, i) => {
@@ -84,7 +82,6 @@ function drawBarChart(canvas, labels, data, highlightKey=null) {
     const y = h - marginBottom - bh;
     ctx.fillStyle = (highlightKey && highlightKey===lab) ? '#79bdff' : '#4ea3ff';
     ctx.fillRect(x, y, barW, bh);
-    // label
     ctx.fillStyle = '#ccc'; ctx.font = '11px system-ui';
     ctx.textAlign = 'center'; ctx.textBaseline = 'top';
     ctx.fillText(lab.replace(/_/g,' ').replace(/\b\w/g, m=>m.toUpperCase()), x + barW/2, h - marginBottom + 4);
@@ -93,12 +90,10 @@ function drawBarChart(canvas, labels, data, highlightKey=null) {
   });
   return areas;
 }
-
 function drawDoughnutChart(canvas, labels, data, highlightKey=null) {
   const ctx = canvas.getContext('2d');
   const w = canvas.width, h = canvas.height;
   ctx.clearRect(0,0,w,h);
-  // Reserve legend column
   const legendW = 130;
   const availW = w - legendW;
   const size = Math.min(availW, h) - 20;
@@ -128,11 +123,9 @@ function drawDoughnutChart(canvas, labels, data, highlightKey=null) {
     areas.push({ start, end: start+ang, cx, cy, r, innerR, key: lab });
     start += ang;
   });
-  // cut hole
   ctx.globalCompositeOperation = 'destination-out';
   ctx.beginPath(); ctx.arc(cx, cy, innerR, 0, Math.PI*2); ctx.fill();
   ctx.globalCompositeOperation = 'source-over';
-  // legend
   ctx.font = '12px system-ui'; ctx.fillStyle = '#ddd'; ctx.textAlign='left'; ctx.textBaseline='middle';
   let y = 18;
   labels.forEach((lab, i)=>{
@@ -145,7 +138,7 @@ function drawDoughnutChart(canvas, labels, data, highlightKey=null) {
   return areas;
 }
 
-// ---- Model ----
+// ---------------------------------- Model -----------------------------------------
 const Stages = {
   PRELIMINARY: "preliminary",
   ACTIVE: "active",
@@ -178,7 +171,7 @@ const Guards = {
   }
 };
 
-// ---- Data access (DB or Demo) ----
+// ------------------------------- Data access --------------------------------------
 async function loadDeals(){ 
   if (window.DEMO_MODE) return JSON.parse(localStorage.getItem(DEMO_KEY)||'{"deals":[]}').deals || [];
   const { data } = await client.from('deals').select('*').order('id'); return data||[]; 
@@ -230,7 +223,7 @@ async function deleteDealFund(id){
   const { error } = await client.from('deal_funds').delete().eq('id', id); if(error){alert(error.message);return false;} return true; 
 }
 
-// ---- Filters + Search (chart -> board) ----
+// ------------------------------- Filters/Search -----------------------------------
 const activeFilter = { stage: null, type: null };
 let searchQuery = '';
 let areasStage = [];
@@ -254,14 +247,12 @@ function clearAllFilters() {
   renderFilterBar();
   renderBoard(filteredDeals(), move, currentFunds, indexDealFunds(currentDealFunds));
 }
-
 function searchMatches(d){
   if(!searchQuery) return true;
   const q = searchQuery.toLowerCase();
   return [d.name, d.source, d.deal_type, d.sector, d.currency]
     .filter(Boolean).some(v => String(v).toLowerCase().includes(q));
 }
-
 function filteredDeals() {
   return currentDeals.filter(d =>
     (!activeFilter.stage || d.stage === activeFilter.stage) &&
@@ -287,12 +278,11 @@ function renderFilterBar() {
   }
   if (!activeFilter.stage && !activeFilter.type && !searchQuery) {
     chips.push(el('span', { className:'light', innerText:'No filters' }));
-  } else {
-    chips.push(el('button', { innerText:'Clear all', onclick:clearAllFilters }));
   }
   chips.forEach(c => bar.appendChild(c));
 }
-// ---- UI helpers ----
+
+// -------------------------------- UI helpers --------------------------------------
 const qs = (s, el=document)=>el.querySelector(s);
 const el = (tag, props={}, children=[]) => {
   const node = document.createElement(tag);
@@ -319,7 +309,121 @@ function attachEditHandlers(container){
   });
 }
 
-// ---- Funds UI ----
+// --------------------- Attachments (Supabase Storage) -----------------------------
+const STORAGE_BUCKET = 'deal-docs';
+
+async function listDealAttachments(dealId) {
+  if (window.DEMO_MODE || !client) return { items: [], error: null };
+  const folder = String(dealId).trim().replace(/\/+$/,'') + '/';
+  const { data, error } = await client
+    .storage
+    .from(STORAGE_BUCKET)
+    .list(folder, { limit: 1000, sortBy: { column: 'name', order: 'desc' } });
+  if (error) return { items: [], error };
+  const items = (data || []).filter(x => x && !x.name.endsWith('/'));
+  return { items, error: null };
+}
+async function uploadDealAttachments(dealId, fileList) {
+  const out = { ok: 0, fail: 0, errors: [] };
+  if (window.DEMO_MODE) { alert('Uploads are disabled in DEMO_MODE'); return out; }
+  if (!client) { alert('Supabase not initialized'); return out; }
+  if (!fileList || !fileList.length) return out;
+
+  const folder = String(dealId).trim().replace(/\/+$/,'');
+  for (const f of [...fileList]) {
+    const safe = f.name.replace(/[^\w.\-]+/g, '_');
+    const key = `${folder}/${Date.now()}-${safe}`;
+    const { error } = await client.storage.from(STORAGE_BUCKET).upload(key, f, {
+      cacheControl: '3600',
+      upsert: false,
+      contentType: f.type || 'application/octet-stream'
+    });
+    if (error) { out.fail++; out.errors.push({ file: f.name, key, error }); console.error('[upload error]', { file: f.name, key, error }); }
+    else { out.ok++; console.log('[uploaded]', key); }
+  }
+  if (out.fail) {
+    const first = out.errors[0];
+    alert(`Upload failed for ${first.file}: ${first.error.message || first.error.status || 'Unknown error'}. Check console for details.`);
+  }
+  return out;
+}
+async function openSignedDownload(dealId, name) {
+  if (window.DEMO_MODE || !client) return;
+  const key = `${String(dealId).trim().replace(/\/+$/,'')}/${name}`;
+  const { data, error } = await client.storage.from(STORAGE_BUCKET).createSignedUrl(key, 60 * 15);
+  if (error) { console.error('signed url error', error); alert('Download unavailable: ' + error.message); return; }
+  window.open(data.signedUrl, '_blank');
+}
+async function deleteDealAttachment(dealId, name) {
+  if (window.DEMO_MODE || !client) return false;
+  const key = `${String(dealId).trim().replace(/\/+$/,'')}/${name}`;
+  const { error } = await client.storage.from(STORAGE_BUCKET).remove([key]);
+  if (error) { console.error('delete error', error); alert('Delete failed: ' + error.message); return false; }
+  return true;
+}
+function fmtSize(bytes) {
+  if (!Number.isFinite(bytes)) return '';
+  const k = 1024, u = ['B','KB','MB','GB','TB'];
+  const i = Math.max(0, Math.floor(Math.log(bytes)/Math.log(k)));
+  return `${(bytes/Math.pow(k,i)).toFixed(1)} ${u[i]}`;
+}
+function AttachmentsPanel({ deal }) {
+  const wrap = el('div', { style:'margin-top:8px; padding-top:8px; border-top:1px dashed #444;' });
+  const header = el('div', { style:'display:flex; align-items:center; justify-content:space-between; gap:8px;' }, [
+    el('span', { className:'light', innerText:'Attachments' }),
+    el('div', {}, [
+      el('button', { innerText:'Upload', style:'margin-right:6px;' }),
+      el('button', { innerText:'Refresh' })
+    ])
+  ]);
+  const fileInput = el('input', { type:'file', multiple:true, style:'display:none' });
+  const list = el('div', { className:'attachments-list', style:'margin-top:6px;' });
+
+  header.children[1].children[0].onclick = () => fileInput.click();
+  fileInput.onchange = async (e) => {
+    const res = await uploadDealAttachments(deal.id, e.target.files);
+    e.target.value = '';
+    if (res.ok) await renderList(true);
+  };
+  header.children[1].children[1].onclick = () => renderList(true);
+
+  wrap.appendChild(header);
+  wrap.appendChild(fileInput);
+  wrap.appendChild(list);
+
+  async function renderList() {
+    list.innerHTML = `<div class="meta">Loading…</div>`;
+    const { items, error } = await listDealAttachments(deal.id);
+    if (error) {
+      list.innerHTML = `<div class="meta" style="color:#c77;">Cannot list files: ${error.message || error.status || 'Unknown error'}</div>`;
+      return;
+    }
+    if (!items.length) { list.innerHTML = `<div class="meta">No attachments yet.</div>`; return; }
+    list.innerHTML = '';
+    for (const x of items) {
+      const row = el('div', { className:'item' }, [
+        el('div', {}, [
+          el('div', { innerText: x.name }),
+          el('div', { className:'meta', innerText: fmtSize(x.size || x.metadata?.size || 0) })
+        ]),
+        el('div', {}, [
+          el('a', { href:'#', innerText:'Download', onclick:(e)=>{ e.preventDefault(); openSignedDownload(deal.id, x.name); } }),
+          el('button', { innerText:'Delete', style:'margin-left:8px;', onclick: async ()=>{
+            if (!confirm('Delete this file?')) return;
+            const ok = await deleteDealAttachment(deal.id, x.name);
+            if (ok) renderList(true);
+          }})
+        ])
+      ]);
+      list.appendChild(row);
+    }
+  }
+
+  renderList();
+  return wrap;
+}
+
+// -------------------------------- Funds UI ----------------------------------------
 function FundsPanel({deal, funds, dealFundsMap}){
   const rows = dealFundsMap[deal.id] || [];
   const total = rows.reduce((a,r)=> a + (Number(r.commitment)||0), 0);
@@ -332,20 +436,20 @@ function FundsPanel({deal, funds, dealFundsMap}){
     beginEdit();
     const df = await insertDealFund({ deal_id: deal.id, fund_id: Number(select.value), role: role.value, status: status.value, commitment: parseFloat(commitment.value||"0") });
     editing = false;
-    if (df) refresh();
+    if (df) refresh(); // full render (board) because data changed
   };
 
   const list = el("div", {}, rows.map(r => FundRow({ row:r, funds, onChange: async (patch)=>{
       beginEdit();
       const saved = await updateDealFund({ id:r.id, ...patch });
       editing = false;
-      if (saved) refresh();
+      if (saved) refresh(); // data changed -> full render
     }, onDelete: async ()=>{
       beginEdit();
       if (confirm("Remove this participation?")) {
         const ok = await deleteDealFund(r.id);
         editing = false;
-        if (ok) refresh();
+        if (ok) refresh(); // data changed -> full render
       } else {
         editing = false;
       }
@@ -381,18 +485,22 @@ function FundRow({row, funds, onChange, onDelete}){
   return rowEl;
 }
 
-// ---- Deal UI ----
+// -------------------------------- Deal UI -----------------------------------------
 function renderStats(deals){
   const { byStage } = metrics(deals);
   const s = qs("#stats"); s.innerHTML = "";
   Object.entries(byStage).forEach(([k,v]) => {
-    s.appendChild(el("div", { className:"stat" }, [
+    const tile = el("div", {
+      className: `stat${activeFilter.stage===k ? ' active':''}`,
+      title: "Click to filter by this stage"
+    }, [
       el("div", { className:"label", innerText: stageLabel(k) }),
       el("div", { className:"value", innerText: v })
-    ]));
+    ]);
+    tile.addEventListener('click', () => setFilter('stage', k));
+    s.appendChild(tile);
   });
 }
-
 function DealCard(d, onMove, funds, dealFundsMap){
   const rejectReason = el("input", { id:`reject-${d.id}`, value: d.data?.reject_reason || "", placeholder:"Reject reason..." });
   const docs = el("input", { type:"checkbox", id:`docs-${d.id}`, checked: !!d.data?.docs_executed });
@@ -410,6 +518,10 @@ function DealCard(d, onMove, funds, dealFundsMap){
       el("label", {}, [fundsSettled, "Funds settled"])
     ]),
     FundsPanel({ deal:d, funds, dealFundsMap }),
+
+    // Attachments panel
+    AttachmentsPanel({ deal: d }),
+
     el("div", { className:"buttons" }, (Allowed[d.stage]||[]).map(next => {
       return el("button", { onclick:()=>onMove(d, next), innerText:`→ ${stageLabel(next)}` });
     }))
@@ -417,7 +529,6 @@ function DealCard(d, onMove, funds, dealFundsMap){
   attachEditHandlers(card);
   return card;
 }
-
 function renderBoard(deals, onMove, funds, dealFundsMap){
   const stages = [Stages.PRELIMINARY, Stages.ACTIVE, Stages.APPROVAL, Stages.CLOSING, Stages.ASSET_MGMT, Stages.REJECTED];
   const board = qs("#board"); board.innerHTML = "";
@@ -428,6 +539,7 @@ function renderBoard(deals, onMove, funds, dealFundsMap){
   });
 }
 
+// ------------------------------- Charts wiring ------------------------------------
 let chartHandlersBound = false;
 function canvasPoint(canvas, evt){
   const rect = canvas.getBoundingClientRect();
@@ -446,7 +558,6 @@ function renderCharts(deals){
     Object.values(by.byStage),
     activeFilter.stage
   );
-
   areasType = drawDoughnutChart(
     typeCanvas,
     Object.keys(by.byType),
@@ -456,15 +567,12 @@ function renderCharts(deals){
 
   if (!chartHandlersBound) {
     chartHandlersBound = true;
-
     stageCanvas.addEventListener('click', (e)=>{
       const p = canvasPoint(stageCanvas, e);
       const hit = areasStage.find(a => p.x>=a.x && p.x<=a.x+a.w && p.y>=a.y && p.y<=a.y+a.h);
-      if (hit) setFilter('stage', hit.key);
-      else clearFilter('stage');
+      if (hit) setFilter('stage', hit.key); else clearFilter('stage');
       renderCharts(currentDeals);
     });
-
     typeCanvas.addEventListener('click', (e)=>{
       const p = canvasPoint(typeCanvas, e);
       const hit = areasType.find(s => {
@@ -473,18 +581,17 @@ function renderCharts(deals){
         if (R < s.innerR || R > s.r) return false;
         let ang = Math.atan2(dy, dx);
         if (ang < -Math.PI/2) ang += Math.PI*2;
-        const within = (ang >= s.start && ang <= s.end) ||
+        const within = (ang >= s.start && s.end >= s.start && ang <= s.end) ||
                        (s.end < s.start && (ang >= s.start || ang <= s.end));
         return within;
       });
-      if (hit) setFilter('type', hit.key);
-      else clearFilter('type');
+      if (hit) setFilter('type', hit.key); else clearFilter('type');
       renderCharts(currentDeals);
     });
   }
 }
 
-// ---- CSV Import/Export ----
+// ------------------------------ CSV Import/Export ---------------------------------
 async function exportCSVs(){
   const [deals, funds, parts] = await Promise.all([loadDeals(), loadFunds(), loadDealFunds()]);
   const fundById = Object.fromEntries(funds.map(f=>[f.id, f]));
@@ -504,7 +611,6 @@ async function exportCSVs(){
   }));
   downloadFile(`deal_funds-${ts}.csv`, toCSV(partRows));
 }
-
 function detectType(rows){
   const keys = new Set(Object.keys(rows[0]||{}).map(k=>k.toLowerCase()));
   const hasDealFunds = keys.has('deal_id') || keys.has('deal_name') || keys.has('fund_id') || keys.has('fund_name');
@@ -556,16 +662,19 @@ async function importRows(rows){
   }
 }
 
-// ---- Controller ----
+// -------------------------------- Controller --------------------------------------
 let currentDeals = [], currentFunds = [], currentDealFunds = [];
 function indexDealFunds(rows){
   return rows.reduce((acc, r)=>{ (acc[r.deal_id] = acc[r.deal_id] || []).push(r); return acc; }, {});
 }
-async function refresh(){
+
+// NOTE: refresh now accepts { renderBoard } to avoid re-mounting attachment panels
+async function refresh(opts = { renderBoard: true }){
   const [deals, funds, df] = await Promise.all([loadDeals(), loadFunds(), loadDealFunds()]);
   currentDeals = deals; currentFunds = funds; currentDealFunds = df;
+
   renderStats(currentDeals);
-  if (!editing) {
+  if (!editing && opts.renderBoard) {
     renderBoard(filteredDeals(), move, currentFunds, indexDealFunds(currentDealFunds));
   }
   renderCharts(currentDeals);
@@ -581,11 +690,41 @@ async function move(deal, to){
   beginEdit();
   const saved = await updateDeal({ id: d.id, stage: to, data: d.data });
   editing = false;
-  if (saved) refresh();
+  if (saved) refresh(); // full render because stage changed
 }
 
-// Add deal + Import/Export bindings + Search
+// ---- Search wiring (restored) ----
+function wireSearchControls(){
+  const sb = document.getElementById('searchBox');
+  const cs = document.getElementById('clearSearch');
+  const ca = document.getElementById('clearAllFiltersBtn');
+
+  if (sb && !sb._wired) {
+    sb._wired = true;
+    sb.addEventListener('input', () => {
+      searchQuery = sb.value.trim();
+      renderFilterBar();
+      renderBoard(filteredDeals(), move, currentFunds, indexDealFunds(currentDealFunds));
+    });
+  }
+  if (cs && !cs._wired) {
+    cs._wired = true;
+    cs.addEventListener('click', () => {
+      searchQuery = ''; sb.value = '';
+      renderFilterBar();
+      renderBoard(filteredDeals(), move, currentFunds, indexDealFunds(currentDealFunds));
+    });
+  }
+  if (ca && !ca._wired) {
+    ca._wired = true;
+    ca.addEventListener('click', clearAllFilters);
+  }
+}
+
+// ---------------------------------- Boot -----------------------------------------
 document.addEventListener('DOMContentLoaded', ()=>{
+  wireSearchControls();
+
   document.getElementById("add").onclick = async () => {
     const name = qs("#name").value.trim(); if(!name) return alert("Deal name required");
     const row = {
@@ -603,7 +742,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
     editing = false;
     if (saved) {
       qs("#name").value = ""; qs("#source").value = ""; qs("#size").value = ""; qs("#sector").value = "";
-      refresh();
+      refresh(); // new deal -> full render
     }
   };
 
@@ -618,20 +757,6 @@ document.addEventListener('DOMContentLoaded', ()=>{
   drop.ondrop = (e)=>{ e.preventDefault(); drop.classList.remove('drag'); handleFiles(e.dataTransfer.files); };
   document.getElementById('export').onclick = exportCSVs;
 
-  // Search
-  const sb = document.getElementById('searchBox');
-  const clearBtn = document.getElementById('clearSearch');
-  if (sb) {
-    sb.addEventListener('input', () => {
-      searchQuery = sb.value.trim();
-      renderFilterBar();
-      renderBoard(filteredDeals(), move, currentFunds, indexDealFunds(currentDealFunds));
-    });
-  }
-  if (clearBtn) {
-    clearBtn.onclick = () => { searchQuery=''; sb.value=''; renderFilterBar(); renderBoard(filteredDeals(), move, currentFunds, indexDealFunds(currentDealFunds)); };
-  }
-
   async function handleFiles(files){
     const f = files[0]; if(!f) return;
     if(!/\.csv$/i.test(f.name)) { status.innerHTML = '<span class="err">Please drop a .csv file.</span>'; return; }
@@ -645,7 +770,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
       const n = await importRows(rows);
       if (n>0) {
         status.innerHTML = '<span class="ok">Imported '+n+' row(s) successfully.</span>';
-        refresh();
+        refresh(); // data changed -> full render
       } else {
         status.innerHTML = '<span class="light">Import canceled.</span>';
       }
@@ -655,6 +780,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   }
 });
 
-// Initial load + polling
-refresh();
-setInterval(()=>{ if(!editing) refresh(); }, 5000);
+// Initial load + gentle polling (poll DOES NOT re-render the board)
+refresh(); // full render on first load
+setInterval(()=>{ if(!editing) refresh({ renderBoard:false }); }, 5000);
+// ======================= /Altaris Deal Pipeline — app.js ==========================

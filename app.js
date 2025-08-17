@@ -3,15 +3,14 @@ let client = null;
 if (!window.DEMO_MODE) {
   client = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
 }
-const DEMO_KEY = 'altaris-demo-data-v59';
+const DEMO_KEY = 'altaris-demo-data-v-pro';
 console.log(`[Altaris] Mode=${window.DEMO_MODE ? 'DEMO' : (client ? 'SUPABASE' : 'NO_CLIENT')}`);
 
-// ----------------------------- Edit-safe refresh -----------------------------------
 let editing=false, editTimer=null;
 function beginEdit(){ editing=true; if(editTimer) clearTimeout(editTimer); }
 function endEditSoon(){ if(editTimer) clearTimeout(editTimer); editTimer=setTimeout(()=>{ editing=false; refresh(); }, 1200); }
 
-// -------------------------------- CSV helpers -------------------------------------
+// ---------------- CSV helpers ----------------
 function parseCSV(text){
   const rows = []; let i=0, cur='', inq=false, row=[];
   while(i<text.length){
@@ -35,9 +34,7 @@ function parseCSV(text){
   if(!rows.length) return [];
   const headers = rows[0].map(h=>h.trim().toLowerCase());
   return rows.slice(1).filter(r=>r.length && r.some(x=>String(x).trim().length)).map(r=>{
-    const obj={};
-    headers.forEach((h,idx)=>obj[h]=r[idx]!==undefined?r[idx].trim():'');
-    return obj;
+    const obj={}; headers.forEach((h,idx)=>obj[h]=r[idx]!==undefined?r[idx].trim():''); return obj;
   });
 }
 function toCSV(rows){
@@ -61,7 +58,7 @@ function downloadFile(name, text){
   URL.revokeObjectURL(a.href);
 }
 
-// --------------------------------- Charts -----------------------------------------
+// ---------------- Charts (simple canvas) ----------------
 function drawBarChart(canvas, labels, data, highlightKey=null) {
   const ctx = canvas.getContext('2d');
   const w = canvas.width, h = canvas.height;
@@ -138,7 +135,7 @@ function drawDoughnutChart(canvas, labels, data, highlightKey=null) {
   return areas;
 }
 
-// ---------------------------------- Model -----------------------------------------
+// ---------------- Model ----------------
 const Stages = {
   PRELIMINARY: "preliminary",
   ACTIVE: "active",
@@ -171,7 +168,7 @@ const Guards = {
   }
 };
 
-// ------------------------------- Data access --------------------------------------
+// ---------------- Data access ----------------
 async function loadDeals(){ 
   if (window.DEMO_MODE) return JSON.parse(localStorage.getItem(DEMO_KEY)||'{"deals":[]}').deals || [];
   const { data } = await client.from('deals').select('*').order('id'); return data||[]; 
@@ -223,7 +220,7 @@ async function deleteDealFund(id){
   const { error } = await client.from('deal_funds').delete().eq('id', id); if(error){alert(error.message);return false;} return true; 
 }
 
-// ------------------------------- Filters/Search -----------------------------------
+// ---------------- Filters / Search ----------------
 const activeFilter = { stage: null, type: null };
 let searchQuery = '';
 let areasStage = [];
@@ -267,11 +264,11 @@ function renderFilterBar() {
   const chips = [];
   if (activeFilter.stage) {
     chips.push(el('span', { className:'chip', innerText:`Stage: ${stageLabel(activeFilter.stage)}` }));
-    chips.push(el('button', { innerText:'Clear stage', onclick:()=>clearFilter('stage') }));
+    chips.push(el('button', { className:'chip-btn', innerText:'Clear stage', onclick:()=>clearFilter('stage') }));
   }
   if (activeFilter.type) {
     chips.push(el('span', { className:'chip', innerText:`Type: ${activeFilter.type}` }));
-    chips.push(el('button', { innerText:'Clear type', onclick:()=>clearFilter('type') }));
+    chips.push(el('button', { className:'chip-btn', innerText:'Clear type', onclick:()=>clearFilter('type') }));
   }
   if (searchQuery) {
     chips.push(el('span', { className:'chip', innerText:`Search: “${searchQuery}”` }));
@@ -282,7 +279,7 @@ function renderFilterBar() {
   chips.forEach(c => bar.appendChild(c));
 }
 
-// -------------------------------- UI helpers --------------------------------------
+// ---------------- UI helpers ----------------
 const qs = (s, el=document)=>el.querySelector(s);
 const el = (tag, props={}, children=[]) => {
   const node = document.createElement(tag);
@@ -309,8 +306,10 @@ function attachEditHandlers(container){
   });
 }
 
-// --------------------- Attachments (Supabase Storage) -----------------------------
+// ---------------- Attachments (Supabase Storage) ----------------
 const STORAGE_BUCKET = 'deal-docs';
+let currentAttachDeal = null;
+const attachmentCountCache = new Map();
 
 async function listDealAttachments(dealId) {
   if (window.DEMO_MODE || !client) return { items: [], error: null };
@@ -322,6 +321,20 @@ async function listDealAttachments(dealId) {
   if (error) return { items: [], error };
   const items = (data || []).filter(x => x && !x.name.endsWith('/'));
   return { items, error: null };
+}
+async function ensureAttachmentCount(dealId){
+  if (attachmentCountCache.has(dealId)) return attachmentCountCache.get(dealId);
+  const { items } = await listDealAttachments(dealId);
+  const n = (items||[]).length;
+  attachmentCountCache.set(dealId, n);
+  return n;
+}
+function updateClipBadge(dealId){
+  const badge = document.getElementById(`clip-badge-${dealId}`);
+  if (!badge) return;
+  const n = attachmentCountCache.get(dealId) || 0;
+  badge.textContent = n;
+  badge.style.display = n ? 'flex' : 'none';
 }
 async function uploadDealAttachments(dealId, fileList) {
   const out = { ok: 0, fail: 0, errors: [] };
@@ -339,12 +352,15 @@ async function uploadDealAttachments(dealId, fileList) {
       contentType: f.type || 'application/octet-stream'
     });
     if (error) { out.fail++; out.errors.push({ file: f.name, key, error }); console.error('[upload error]', { file: f.name, key, error }); }
-    else { out.ok++; console.log('[uploaded]', key); }
+    else { out.ok++; }
   }
   if (out.fail) {
     const first = out.errors[0];
     alert(`Upload failed for ${first.file}: ${first.error.message || first.error.status || 'Unknown error'}. Check console for details.`);
   }
+  const { items } = await listDealAttachments(dealId);
+  attachmentCountCache.set(dealId, (items||[]).length);
+  updateClipBadge(dealId);
   return out;
 }
 async function openSignedDownload(dealId, name) {
@@ -359,6 +375,9 @@ async function deleteDealAttachment(dealId, name) {
   const key = `${String(dealId).trim().replace(/\/+$/,'')}/${name}`;
   const { error } = await client.storage.from(STORAGE_BUCKET).remove([key]);
   if (error) { console.error('delete error', error); alert('Delete failed: ' + error.message); return false; }
+  const { items } = await listDealAttachments(dealId);
+  attachmentCountCache.set(dealId, (items||[]).length);
+  updateClipBadge(dealId);
   return true;
 }
 function fmtSize(bytes) {
@@ -367,63 +386,57 @@ function fmtSize(bytes) {
   const i = Math.max(0, Math.floor(Math.log(bytes)/Math.log(k)));
   return `${(bytes/Math.pow(k,i)).toFixed(1)} ${u[i]}`;
 }
-function AttachmentsPanel({ deal }) {
-  const wrap = el('div', { style:'margin-top:8px; padding-top:8px; border-top:1px dashed #444;' });
-  const header = el('div', { style:'display:flex; align-items:center; justify-content:space-between; gap:8px;' }, [
-    el('span', { className:'light', innerText:'Attachments' }),
-    el('div', {}, [
-      el('button', { innerText:'Upload', style:'margin-right:6px;' }),
-      el('button', { innerText:'Refresh' })
-    ])
-  ]);
-  const fileInput = el('input', { type:'file', multiple:true, style:'display:none' });
-  const list = el('div', { className:'attachments-list', style:'margin-top:6px;' });
 
-  header.children[1].children[0].onclick = () => fileInput.click();
-  fileInput.onchange = async (e) => {
-    const res = await uploadDealAttachments(deal.id, e.target.files);
-    e.target.value = '';
-    if (res.ok) await renderList(true);
-  };
-  header.children[1].children[1].onclick = () => renderList(true);
-
-  wrap.appendChild(header);
-  wrap.appendChild(fileInput);
-  wrap.appendChild(list);
-
-  async function renderList() {
-    list.innerHTML = `<div class="meta">Loading…</div>`;
-    const { items, error } = await listDealAttachments(deal.id);
-    if (error) {
-      list.innerHTML = `<div class="meta" style="color:#c77;">Cannot list files: ${error.message || error.status || 'Unknown error'}</div>`;
-      return;
-    }
-    if (!items.length) { list.innerHTML = `<div class="meta">No attachments yet.</div>`; return; }
-    list.innerHTML = '';
-    for (const x of items) {
-      const row = el('div', { className:'item' }, [
-        el('div', {}, [
-          el('div', { innerText: x.name }),
-          el('div', { className:'meta', innerText: fmtSize(x.size || x.metadata?.size || 0) })
-        ]),
-        el('div', {}, [
-          el('a', { href:'#', innerText:'Download', onclick:(e)=>{ e.preventDefault(); openSignedDownload(deal.id, x.name); } }),
-          el('button', { innerText:'Delete', style:'margin-left:8px;', onclick: async ()=>{
-            if (!confirm('Delete this file?')) return;
-            const ok = await deleteDealAttachment(deal.id, x.name);
-            if (ok) renderList(true);
-          }})
-        ])
-      ]);
-      list.appendChild(row);
-    }
+// Modal open/close + render
+async function openAttachmentsModal(deal){
+  currentAttachDeal = deal;
+  const modal = document.getElementById('attachmentModal');
+  const title = document.getElementById('attachTitle');
+  title.textContent = `Attachments — ${deal.name}`;
+  modal.classList.add('open');
+  await renderAttachmentList();
+}
+function closeAttachmentsModal(){
+  currentAttachDeal = null;
+  document.getElementById('attachmentModal').classList.remove('open');
+}
+async function renderAttachmentList(){
+  const listDiv = document.getElementById('attachmentList');
+  if (!currentAttachDeal) return;
+  listDiv.innerHTML = 'Loading…';
+  const { items, error } = await listDealAttachments(currentAttachDeal.id);
+  if (error) {
+    listDiv.innerHTML = `<div class="err">Cannot list files: ${error.message || error.status || 'Unknown error'}</div>`;
+    return;
   }
+  attachmentCountCache.set(currentAttachDeal.id, (items||[]).length);
+  updateClipBadge(currentAttachDeal.id);
 
-  renderList();
-  return wrap;
+  if (!items.length){
+    listDiv.innerHTML = `<div class="light">No attachments yet.</div>`;
+    return;
+  }
+  listDiv.innerHTML = '';
+  items.forEach(x=>{
+    const row = el('div', { className:'list-row' }, [
+      el('div', {}, [
+        el('div', { innerText: x.name }),
+        el('div', { className:'meta', innerText: fmtSize(x.size || x.metadata?.size || 0) })
+      ]),
+      el('div', {}, [
+        el('a', { href:'#', className:'ghost-btn', innerText:'Download', onclick: async (e)=>{ e.preventDefault(); await openSignedDownload(currentAttachDeal.id, x.name); } }),
+        el('button', { className:'ghost-btn', innerText:'Delete', style:'margin-left:6px;', onclick: async ()=>{
+          if (!confirm('Delete this file?')) return;
+          const ok = await deleteDealAttachment(currentAttachDeal.id, x.name);
+          if (ok) renderAttachmentList();
+        }})
+      ])
+    ]);
+    listDiv.appendChild(row);
+  });
 }
 
-// -------------------------------- Funds UI ----------------------------------------
+// ---------------- Funds UI ----------------
 function FundsPanel({deal, funds, dealFundsMap}){
   const rows = dealFundsMap[deal.id] || [];
   const total = rows.reduce((a,r)=> a + (Number(r.commitment)||0), 0);
@@ -436,20 +449,20 @@ function FundsPanel({deal, funds, dealFundsMap}){
     beginEdit();
     const df = await insertDealFund({ deal_id: deal.id, fund_id: Number(select.value), role: role.value, status: status.value, commitment: parseFloat(commitment.value||"0") });
     editing = false;
-    if (df) refresh(); // full render (board) because data changed
+    if (df) refresh();
   };
 
   const list = el("div", {}, rows.map(r => FundRow({ row:r, funds, onChange: async (patch)=>{
       beginEdit();
       const saved = await updateDealFund({ id:r.id, ...patch });
       editing = false;
-      if (saved) refresh(); // data changed -> full render
+      if (saved) refresh();
     }, onDelete: async ()=>{
       beginEdit();
       if (confirm("Remove this participation?")) {
         const ok = await deleteDealFund(r.id);
         editing = false;
-        if (ok) refresh(); // data changed -> full render
+        if (ok) refresh();
       } else {
         editing = false;
       }
@@ -485,7 +498,7 @@ function FundRow({row, funds, onChange, onDelete}){
   return rowEl;
 }
 
-// -------------------------------- Deal UI -----------------------------------------
+// ---------------- Deal UI ----------------
 function renderStats(deals){
   const { byStage } = metrics(deals);
   const s = qs("#stats"); s.innerHTML = "";
@@ -506,8 +519,17 @@ function DealCard(d, onMove, funds, dealFundsMap){
   const docs = el("input", { type:"checkbox", id:`docs-${d.id}`, checked: !!d.data?.docs_executed });
   const fundsSettled = el("input", { type:"checkbox", id:`funds-${d.id}`, checked: !!d.data?.funds_settled });
 
+  // outlined paperclip SVG (pro)
+  const clipSVG = '<svg class="clip-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M21.44 11.05l-8.49 8.49a5.5 5.5 0 11-7.78-7.78l9.19-9.19a3.5 3.5 0 014.95 4.95l-9.9 9.9a1.5 1.5 0 11-2.12-2.12l8.49-8.49" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const attachBtn = el("button", { className:"clip-btn", title:"Manage attachments", innerHTML:clipSVG, onclick: ()=> openAttachmentsModal(d) });
+  const badge = el("div", { id:`clip-badge-${d.id}`, className:"clip-badge", innerText:"0" });
+  attachBtn.appendChild(badge);
+
   const card = el("div", { className:"card" }, [
-    el("div", { innerHTML:`<b>${d.name}</b>` }),
+    el("div", { className:"card-header" }, [
+      el("div", { innerHTML:`<b>${d.name}</b>` }),
+      attachBtn
+    ]),
     el("div", { innerText:`Source: ${d.source||""}` }),
     el("div", { innerText:`Type: ${d.deal_type||""}` }),
     el("div", { innerText:`${d.currency||"USD"} ${d.size||0}M` }),
@@ -518,14 +540,14 @@ function DealCard(d, onMove, funds, dealFundsMap){
       el("label", {}, [fundsSettled, "Funds settled"])
     ]),
     FundsPanel({ deal:d, funds, dealFundsMap }),
-
-    // Attachments panel
-    AttachmentsPanel({ deal: d }),
-
     el("div", { className:"buttons" }, (Allowed[d.stage]||[]).map(next => {
       return el("button", { onclick:()=>onMove(d, next), innerText:`→ ${stageLabel(next)}` });
     }))
   ]);
+
+  // lazy badge count
+  ensureAttachmentCount(d.id).then(()=> updateClipBadge(d.id));
+
   attachEditHandlers(card);
   return card;
 }
@@ -539,7 +561,7 @@ function renderBoard(deals, onMove, funds, dealFundsMap){
   });
 }
 
-// ------------------------------- Charts wiring ------------------------------------
+// ---------------- Charts wiring ----------------
 let chartHandlersBound = false;
 function canvasPoint(canvas, evt){
   const rect = canvas.getBoundingClientRect();
@@ -591,7 +613,7 @@ function renderCharts(deals){
   }
 }
 
-// ------------------------------ CSV Import/Export ---------------------------------
+// ---------------- CSV Import/Export ----------------
 async function exportCSVs(){
   const [deals, funds, parts] = await Promise.all([loadDeals(), loadFunds(), loadDealFunds()]);
   const fundById = Object.fromEntries(funds.map(f=>[f.id, f]));
@@ -662,13 +684,11 @@ async function importRows(rows){
   }
 }
 
-// -------------------------------- Controller --------------------------------------
+// ---------------- Controller ----------------
 let currentDeals = [], currentFunds = [], currentDealFunds = [];
 function indexDealFunds(rows){
   return rows.reduce((acc, r)=>{ (acc[r.deal_id] = acc[r.deal_id] || []).push(r); return acc; }, {});
 }
-
-// NOTE: refresh now accepts { renderBoard } to avoid re-mounting attachment panels
 async function refresh(opts = { renderBoard: true }){
   const [deals, funds, df] = await Promise.all([loadDeals(), loadFunds(), loadDealFunds()]);
   currentDeals = deals; currentFunds = funds; currentDealFunds = df;
@@ -680,7 +700,6 @@ async function refresh(opts = { renderBoard: true }){
   renderCharts(currentDeals);
   renderFilterBar();
 }
-
 async function move(deal, to){
   const key = `${deal.stage}->${to}`;
   const guard = Guards[key] || (()=>[]);
@@ -690,10 +709,10 @@ async function move(deal, to){
   beginEdit();
   const saved = await updateDeal({ id: d.id, stage: to, data: d.data });
   editing = false;
-  if (saved) refresh(); // full render because stage changed
+  if (saved) refresh();
 }
 
-// ---- Search wiring (restored) ----
+// ---------------- Search wiring ----------------
 function wireSearchControls(){
   const sb = document.getElementById('searchBox');
   const cs = document.getElementById('clearSearch');
@@ -721,9 +740,31 @@ function wireSearchControls(){
   }
 }
 
-// ---------------------------------- Boot -----------------------------------------
+// ---------------- Boot ----------------
 document.addEventListener('DOMContentLoaded', ()=>{
   wireSearchControls();
+
+  // Modal buttons
+  const modal = document.getElementById('attachmentModal');
+  const uploadBtn = document.getElementById('attachUploadBtn');
+  const refreshBtn = document.getElementById('attachRefreshBtn');
+  const closeBtn = document.getElementById('attachCloseBtn');
+  const fileInput = document.getElementById('attachFileInput');
+
+  uploadBtn.onclick = ()=> fileInput.click();
+  fileInput.onchange = async (e)=>{
+    if (currentAttachDeal){
+      const res = await uploadDealAttachments(currentAttachDeal.id, e.target.files);
+      e.target.value = '';
+      if (res.ok) await renderAttachmentList();
+    }
+  };
+  refreshBtn.onclick = ()=> renderAttachmentList();
+  closeBtn.onclick = ()=> closeAttachmentsModal();
+
+  // Close on backdrop click + Esc
+  modal.addEventListener('click', (e)=>{ if (e.target === modal) closeAttachmentsModal(); });
+  document.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') closeAttachmentsModal(); });
 
   document.getElementById("add").onclick = async () => {
     const name = qs("#name").value.trim(); if(!name) return alert("Deal name required");
@@ -742,16 +783,17 @@ document.addEventListener('DOMContentLoaded', ()=>{
     editing = false;
     if (saved) {
       qs("#name").value = ""; qs("#source").value = ""; qs("#size").value = ""; qs("#sector").value = "";
-      refresh(); // new deal -> full render
+      refresh();
     }
   };
 
-  const fileInput = document.getElementById('file');
+  // Import/Export wiring
+  const file = document.getElementById('file');
   const importBtn = document.getElementById('importBtn');
   const drop = document.getElementById('drop');
   const status = document.getElementById('importStatus');
-  importBtn.onclick = ()=> fileInput.click();
-  fileInput.onchange = async (e)=> handleFiles(e.target.files);
+  importBtn.onclick = ()=> file.click();
+  file.onchange = async (e)=> handleFiles(e.target.files);
   drop.ondragover = (e)=>{ e.preventDefault(); drop.classList.add('drag'); };
   drop.ondragleave = ()=> drop.classList.remove('drag');
   drop.ondrop = (e)=>{ e.preventDefault(); drop.classList.remove('drag'); handleFiles(e.dataTransfer.files); };
@@ -770,7 +812,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
       const n = await importRows(rows);
       if (n>0) {
         status.innerHTML = '<span class="ok">Imported '+n+' row(s) successfully.</span>';
-        refresh(); // data changed -> full render
+        refresh();
       } else {
         status.innerHTML = '<span class="light">Import canceled.</span>';
       }
@@ -780,7 +822,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   }
 });
 
-// Initial load + gentle polling (poll DOES NOT re-render the board)
-refresh(); // full render on first load
+// Initial load + non-destructive background refresh
+refresh();
 setInterval(()=>{ if(!editing) refresh({ renderBoard:false }); }, 5000);
 // ======================= /Altaris Deal Pipeline — app.js ==========================

@@ -336,31 +336,66 @@ function updateClipBadge(dealId){
   badge.textContent = n;
   badge.style.display = n ? 'flex' : 'none';
 }
+
 async function uploadDealAttachments(dealId, fileList) {
   const out = { ok: 0, fail: 0, errors: [] };
   if (window.DEMO_MODE) { alert('Uploads are disabled in DEMO_MODE'); return out; }
   if (!client) { alert('Supabase not initialized'); return out; }
   if (!fileList || !fileList.length) return out;
 
-  const folder = String(dealId).trim().replace(/\/+$/,'');
+  const folder = String(dealId).trim().replace(/\/+$/,'');  // e.g., "uuid"
+  const ingestErrors = [];
+
   for (const f of [...fileList]) {
     const safe = f.name.replace(/[^\w.\-]+/g, '_');
     const key = `${folder}/${Date.now()}-${safe}`;
-    const { error } = await client.storage.from(STORAGE_BUCKET).upload(key, f, {
+
+    // 1) Upload to Supabase Storage (exact bucket from config)
+    const { data, error } = await client.storage.from(STORAGE_BUCKET).upload(key, f, {
       cacheControl: '3600',
       upsert: false,
       contentType: f.type || 'application/octet-stream'
     });
-    if (error) { out.fail++; out.errors.push({ file: f.name, key, error }); console.error('[upload error]', { file: f.name, key, error }); }
-    else { out.ok++; }
+
+    if (error) {
+      out.fail++; out.errors.push({ file: f.name, key, error });
+      console.error('[upload error]', { file: f.name, key, error });
+      continue;
+    }
+
+    out.ok++;
+
+    // 2) Kick off indexing with the EXACT saved path (data.path)
+    try {
+      if (typeof window.ingestDealDocs === 'function') {
+        await window.ingestDealDocs({
+          dealId,
+          bucket: STORAGE_BUCKET,
+          path: data.path,                 // exact object key as saved in Storage
+          filename: f.name,
+          mime: f.type || 'application/pdf'
+        });
+      } else {
+        console.warn('ingestDealDocs helper not loaded; skipping indexing');
+      }
+    } catch (e) {
+      ingestErrors.push({ file: f.name, message: e?.message || String(e) });
+      console.error('[ingest error]', e);
+    }
   }
-  if (out.fail) {
-    const first = out.errors[0];
-    alert(`Upload failed for ${first.file}: ${first.error.message || first.error.status || 'Unknown error'}. Check console for details.`);
-  }
+
+  // Refresh UI after all uploads
   const { items } = await listDealAttachments(dealId);
   attachmentCountCache.set(dealId, (items||[]).length);
   updateClipBadge(dealId);
+
+  if (out.fail) {
+    const first = out.errors[0];
+    alert(`Upload failed for ${first.file}: ${first.error?.message || first.error?.status || 'Unknown error'}. Check console for details.`);
+  }
+  if (ingestErrors.length) {
+    console.warn('Some files failed to index', ingestErrors);
+  }
   return out;
 }
 async function openSignedDownload(dealId, name) {
@@ -525,10 +560,17 @@ function DealCard(d, onMove, funds, dealFundsMap){
   const badge = el("div", { id:`clip-badge-${d.id}`, className:"clip-badge", innerText:"0" });
   attachBtn.appendChild(badge);
 
+  // chat bubble SVG (stroke-only, matching clip style)
+  const chatSVG = '<svg class="clip-svg" viewBox="0 0 24 24" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none"><path d="M21 12a8.5 8.5 0 01-8.5 8.5c-1.52 0-2.95-.38-4.2-1.06L3 21l1.63-4.16A8.47 8.47 0 013.5 12 8.5 8.5 0 1112 20.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const chatBtn = el("button", { className:"clip-btn", title:"Chat", innerHTML:chatSVG });
+  chatBtn.setAttribute('data-action','chat');
+  chatBtn.setAttribute('data-deal-id', d.id);
+  chatBtn.setAttribute('data-deal-name', d.name);
+
   const card = el("div", { className:"card" }, [
     el("div", { className:"card-header" }, [
       el("div", { innerHTML:`<b>${d.name}</b>` }),
-      attachBtn
+      el("div", { style:"display:flex; gap:6px; align-items:center;" }, [attachBtn, chatBtn])
     ]),
     el("div", { innerText:`Source: ${d.source||""}` }),
     el("div", { innerText:`Type: ${d.deal_type||""}` }),

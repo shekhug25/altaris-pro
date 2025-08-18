@@ -74,6 +74,17 @@
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js"></script>
+    <!-- Altaris Docs Chat config -->
+<script>
+  // Supabase prod example:
+  window.DOCS_CHAT_CONFIG = {
+    endpoint: "https://volftexuyqyykrnewewa.supabase.co/functions/v1/doc-search",
+    topK: 5
+  };
+
+  // For local dev with the Supabase CLI, you can use:
+  // window.DOCS_CHAT_CONFIG = { endpoint: "http://localhost:54321/functions/v1/doc-search", topK: 5 };
+</script>
 </head>
 <body>
   <header>
@@ -139,6 +150,13 @@
     </div>
   </div>
 
+
+  <script src="/js/doc-ingest-client.js" defer></script>
+  <script src="./js/chat-launcher.js" defer></script>
   <script src="./app.js"></script>
+
+  
+
+
 </body>
 </html>

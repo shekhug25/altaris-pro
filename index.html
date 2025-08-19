@@ -19,6 +19,7 @@
     .stat .label { font-size: 12px; opacity: .7; }
     .stat .value { font-size: 22px; font-weight: 700; }
     .stat.active { outline:2px solid var(--accent); box-shadow:0 0 0 2px #4ea3ff33 inset; }
+    .stat[role="button"] { outline-offset: 2px; }
 
     /* Board + cards */
     .board { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; padding-bottom: 24px; margin-top: 12px; }
@@ -74,23 +75,18 @@
   </style>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js"></script>
-    <!-- Altaris Docs Chat config -->
-<script>
-  // Supabase prod example:
-  window.DOCS_CHAT_CONFIG = {
-    endpoint: "https://volftexuyqyykrnewewa.supabase.co/functions/v1/doc-search",
-    topK: 5
-  };
-
-  // For local dev with the Supabase CLI, you can use:
-  // window.DOCS_CHAT_CONFIG = { endpoint: "http://localhost:54321/functions/v1/doc-search", topK: 5 };
-</script>
+  <script>
+    window.DOCS_CHAT_CONFIG = {
+      endpoint: "https://volftexuyqyykrnewewa.supabase.co/functions/v1/doc-search",
+      topK: 5
+    };
+  </script>
 </head>
 <body>
   <header>
     <div>
       <div style="font-size:20px; font-weight:700;">Altaris — Deal Pipeline</div>
-      <div style="font-size:12px; opacity:.7;">outlined clip • chip clears • spacing</div>
+      <div style="font-size:12px; opacity:.7;">interactive sector donut • ordered palettes • clickable legends</div>
     </div>
     <div class="actions">
       <input type="file" id="file" accept=".csv" style="display:none" />
@@ -120,12 +116,13 @@
 
     <section class="stats" id="stats"></section>
 
+    <!-- Charts: Deal Type donut (left) + Sector donut (right) -->
     <section class="charts">
-      <canvas id="chartStage" width="380" height="240"></canvas>
       <canvas id="chartType" width="380" height="240"></canvas>
+      <canvas id="chartSector" width="380" height="240"></canvas>
     </section>
 
-    <!-- Filters row (chips + search + clears together) -->
+    <!-- Filters row -->
     <div id="filtersToolbar">
       <div id="filterBar" class="fund-row" style="gap:8px;"></div>
       <input id="searchBox" placeholder="Search deals…" />
@@ -150,13 +147,8 @@
     </div>
   </div>
 
-
   <script src="/js/doc-ingest-client.js" defer></script>
   <script src="./js/chat-launcher.js" defer></script>
   <script src="./app.js"></script>
-
-  
-
-
 </body>
 </html>

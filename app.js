@@ -1,4 +1,4 @@
-// ========================== Altaris Deal Pipeline — app.js ==========================
+// ========================== Altaris Deal Pipeline — app.js (clickable legends) ==========================
 let client = null;
 if (!window.DEMO_MODE) {
   client = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
@@ -58,35 +58,7 @@ function downloadFile(name, text){
   URL.revokeObjectURL(a.href);
 }
 
-// ---------------- Charts (simple canvas) ----------------
-function drawBarChart(canvas, labels, data, highlightKey=null) {
-  const ctx = canvas.getContext('2d');
-  const w = canvas.width, h = canvas.height;
-  ctx.clearRect(0,0,w,h);
-  const marginLeft = 36, marginBottom = 32, marginTop = 14, marginRight = 12;
-  const barGap = 10;
-  const max = Math.max(1, ...data);
-  const chartW = w - marginLeft - marginRight, chartH = h - marginTop - marginBottom;
-  const barW = Math.max(8, (chartW - (labels.length-1)*barGap) / labels.length);
-  ctx.strokeStyle = '#555'; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(marginLeft, h-marginBottom); ctx.lineTo(w-marginRight, h-marginBottom); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(marginLeft, marginTop); ctx.lineTo(marginLeft, h-marginBottom); ctx.stroke();
-  let x = marginLeft;
-  const areas = [];
-  labels.forEach((lab, i) => {
-    const val = data[i]||0;
-    const bh = (val / max) * (chartH-8);
-    const y = h - marginBottom - bh;
-    ctx.fillStyle = (highlightKey && highlightKey===lab) ? '#79bdff' : '#4ea3ff';
-    ctx.fillRect(x, y, barW, bh);
-    ctx.fillStyle = '#ccc'; ctx.font = '11px system-ui';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-    ctx.fillText(lab.replace(/_/g,' ').replace(/\b\w/g, m=>m.toUpperCase()), x + barW/2, h - marginBottom + 4);
-    areas.push({ x, y, w: barW, h: bh, key: lab });
-    x += barW + barGap;
-  });
-  return areas;
-}
+// ---------------- Charts (canvas) ----------------
 function drawDoughnutChart(canvas, labels, data, highlightKey=null) {
   const ctx = canvas.getContext('2d');
   const w = canvas.width, h = canvas.height;
@@ -99,9 +71,10 @@ function drawDoughnutChart(canvas, labels, data, highlightKey=null) {
   const r = Math.floor(size/2);
   const innerR = Math.floor(r * 0.6);
   const total = data.reduce((a,b)=>a+b,0) || 1;
-  const colors = ['#4ea3ff','#28a745','#ffc107','#dc3545','#6f42c1','#17a2b8','#ff7f50','#9acd32'];
+  const colors = ['#4ea3ff','#28a745','#ffc107','#dc3545','#6f42c1','#17a2b8','#ff7f50','#9acd32','#20c997','#e83e8c'];
   let start = -Math.PI/2;
-  const areas = [];
+  const arcs = [];
+  const legends = [];
   function lighten(hex, amt){
     const c = parseInt(hex.slice(1), 16);
     const rr = Math.min(255, ((c>>16)&255) + Math.round(255*amt));
@@ -117,22 +90,30 @@ function drawDoughnutChart(canvas, labels, data, highlightKey=null) {
     const base = colors[i % colors.length];
     ctx.fillStyle = (highlightKey && highlightKey===lab) ? lighten(base, 0.18) : base;
     ctx.fill();
-    areas.push({ start, end: start+ang, cx, cy, r, innerR, key: lab });
+    arcs.push({ start, end: start+ang, cx, cy, r, innerR, key: lab });
     start += ang;
   });
+  // donut hole
   ctx.globalCompositeOperation = 'destination-out';
   ctx.beginPath(); ctx.arc(cx, cy, innerR, 0, Math.PI*2); ctx.fill();
   ctx.globalCompositeOperation = 'source-over';
+  // legend
   ctx.font = '12px system-ui'; ctx.fillStyle = '#ddd'; ctx.textAlign='left'; ctx.textBaseline='middle';
   let y = 18;
+  const legendX = availW + 12;
+  const box = 10, gapY = 18;
   labels.forEach((lab, i)=>{
     ctx.fillStyle = colors[i % colors.length];
-    ctx.fillRect(availW + 12, y-6, 10, 10);
+    ctx.fillRect(legendX, y-6, box, box);
+    legends.push({ x: legendX - 2, y: y - 9, w: (w - legendX) - 8, h: 16, key: lab }); // clickable row (box + text)
     ctx.fillStyle = '#ddd';
-    ctx.fillText(`${lab}: ${data[i]||0}`, availW + 28, y);
-    y += 18;
+    ctx.fillText(`${lab}: ${data[i]||0}`, legendX + 16, y);
+    y += gapY;
   });
-  return areas;
+  // return arcs but attach legends so existing code keeps working
+  arcs.legends = legends;
+  arcs.center = { cx, cy, r, innerR };
+  return arcs;
 }
 
 // ---------------- Model ----------------
@@ -144,6 +125,7 @@ const Stages = {
   ASSET_MGMT: "asset_management",
   REJECTED: "rejected",
 };
+const STAGE_ORDER = [ "preliminary","active","approval","closing","asset_management","rejected" ];
 const Allowed = {
   [Stages.PRELIMINARY]: [Stages.ACTIVE],
   [Stages.ACTIVE]: [Stages.APPROVAL, Stages.REJECTED],
@@ -221,28 +203,36 @@ async function deleteDealFund(id){
 }
 
 // ---------------- Filters / Search ----------------
-const activeFilter = { stage: null, type: null };
+const activeFilter = { stage: null, type: null, sector: null };
 let searchQuery = '';
-let areasStage = [];
 let areasType = [];
+let areasSector = [];
 
+function toTitle(str){ return (str||'').replace(/_/g,' ').replace(/\b\w/g, c=>c.toUpperCase()); }
 function setFilter(kind, value) {
   activeFilter[kind] = (activeFilter[kind] === value ? null : value);
   renderFilterBar();
   renderBoard(filteredDeals(), move, currentFunds, indexDealFunds(currentDealFunds));
+  renderStats(currentDeals);              // instant palette highlight
+  renderCharts(currentDeals);             // instant chart highlight
 }
 function clearFilter(kind) {
   activeFilter[kind] = null;
   renderFilterBar();
   renderBoard(filteredDeals(), move, currentFunds, indexDealFunds(currentDealFunds));
+  renderStats(currentDeals);
+  renderCharts(currentDeals);
 }
 function clearAllFilters() {
   activeFilter.stage = null;
   activeFilter.type = null;
+  activeFilter.sector = null;
   searchQuery = '';
   const sb = document.getElementById('searchBox'); if (sb) sb.value = '';
   renderFilterBar();
   renderBoard(filteredDeals(), move, currentFunds, indexDealFunds(currentDealFunds));
+  renderStats(currentDeals);
+  renderCharts(currentDeals);
 }
 function searchMatches(d){
   if(!searchQuery) return true;
@@ -254,6 +244,7 @@ function filteredDeals() {
   return currentDeals.filter(d =>
     (!activeFilter.stage || d.stage === activeFilter.stage) &&
     (!activeFilter.type  || d.deal_type === activeFilter.type) &&
+    (!activeFilter.sector|| (d.sector||'Unspecified') === activeFilter.sector) &&
     searchMatches(d)
   );
 }
@@ -270,10 +261,14 @@ function renderFilterBar() {
     chips.push(el('span', { className:'chip', innerText:`Type: ${activeFilter.type}` }));
     chips.push(el('button', { className:'chip-btn', innerText:'Clear type', onclick:()=>clearFilter('type') }));
   }
+  if (activeFilter.sector) {
+    chips.push(el('span', { className:'chip', innerText:`Sector: ${activeFilter.sector}` }));
+    chips.push(el('button', { className:'chip-btn', innerText:'Clear sector', onclick:()=>clearFilter('sector') }));
+  }
   if (searchQuery) {
     chips.push(el('span', { className:'chip', innerText:`Search: “${searchQuery}”` }));
   }
-  if (!activeFilter.stage && !activeFilter.type && !searchQuery) {
+  if (!activeFilter.stage && !activeFilter.type && !activeFilter.sector && !searchQuery) {
     chips.push(el('span', { className:'light', innerText:'No filters' }));
   }
   chips.forEach(c => bar.appendChild(c));
@@ -290,13 +285,15 @@ const el = (tag, props={}, children=[]) => {
   });
   return node;
 };
-function stageLabel(s){ return s.replace(/_/g, " "); }
+function stageLabel(s){ return toTitle(s); }
 function metrics(deals){
   return deals.reduce((acc,d)=>{
     acc.byStage[d.stage]=(acc.byStage[d.stage]||0)+1;
     acc.byType[d.deal_type]=(acc.byType[d.deal_type]||0)+1;
+    const sec = d.sector || 'Unspecified';
+    acc.bySector[sec]=(acc.bySector[sec]||0)+1;
     return acc;
-  }, { byStage:{}, byType:{} });
+  }, { byStage:{}, byType:{}, bySector:{} });
 }
 function attachEditHandlers(container){
   container.querySelectorAll('input, select, textarea').forEach(inp => {
@@ -537,10 +534,14 @@ function FundRow({row, funds, onChange, onDelete}){
 function renderStats(deals){
   const { byStage } = metrics(deals);
   const s = qs("#stats"); s.innerHTML = "";
-  Object.entries(byStage).forEach(([k,v]) => {
+  STAGE_ORDER.forEach((k) => {
+    const v = byStage[k] || 0;
     const tile = el("div", {
       className: `stat${activeFilter.stage===k ? ' active':''}`,
-      title: "Click to filter by this stage"
+      title: "Click to filter by this stage",
+      tabIndex: 0,
+      role: "button",
+      onkeydown: (e)=>{ if(e.key==='Enter'||e.key===' ') { e.preventDefault(); setFilter('stage', k); } }
     }, [
       el("div", { className:"label", innerText: stageLabel(k) }),
       el("div", { className:"value", innerText: v })
@@ -594,7 +595,7 @@ function DealCard(d, onMove, funds, dealFundsMap){
   return card;
 }
 function renderBoard(deals, onMove, funds, dealFundsMap){
-  const stages = [Stages.PRELIMINARY, Stages.ACTIVE, Stages.APPROVAL, Stages.CLOSING, Stages.ASSET_MGMT, Stages.REJECTED];
+  const stages = STAGE_ORDER;
   const board = qs("#board"); board.innerHTML = "";
   stages.forEach(stage => {
     const col = el("div", { className:"col" }, el("b", { innerText: stageLabel(stage) }));
@@ -613,33 +614,30 @@ function canvasPoint(canvas, evt){
 }
 function renderCharts(deals){
   const by = metrics(deals);
-  const stageCanvas = document.getElementById("chartStage");
-  const typeCanvas  = document.getElementById("chartType");
+  const typeCanvas   = document.getElementById("chartType");
+  const sectorCanvas = document.getElementById("chartSector");
 
-  areasStage = drawBarChart(
-    stageCanvas,
-    Object.keys(by.byStage),
-    Object.values(by.byStage),
-    activeFilter.stage
-  );
+  // deal type donut
   areasType = drawDoughnutChart(
     typeCanvas,
     Object.keys(by.byType),
     Object.values(by.byType),
     activeFilter.type
   );
+  // sector donut
+  areasSector = drawDoughnutChart(
+    sectorCanvas,
+    Object.keys(by.bySector),
+    Object.values(by.bySector),
+    activeFilter.sector
+  );
 
   if (!chartHandlersBound) {
     chartHandlersBound = true;
-    stageCanvas.addEventListener('click', (e)=>{
-      const p = canvasPoint(stageCanvas, e);
-      const hit = areasStage.find(a => p.x>=a.x && p.x<=a.x+a.w && p.y>=a.y && p.y<=a.y+a.h);
-      if (hit) setFilter('stage', hit.key); else clearFilter('stage');
-      renderCharts(currentDeals);
-    });
-    typeCanvas.addEventListener('click', (e)=>{
-      const p = canvasPoint(typeCanvas, e);
-      const hit = areasType.find(s => {
+
+    const hitArc = (areas, canvas, e)=>{
+      const p = canvasPoint(canvas, e);
+      const hit = areas.find(s => {
         const dx = p.x - s.cx, dy = p.y - s.cy;
         const R = Math.hypot(dx, dy);
         if (R < s.innerR || R > s.r) return false;
@@ -649,13 +647,26 @@ function renderCharts(deals){
                        (s.end < s.start && (ang >= s.start || ang <= s.end));
         return within;
       });
+      return hit;
+    };
+    const hitLegend = (areas, canvas, e)=>{
+      const p = canvasPoint(canvas, e);
+      const legends = areas.legends || [];
+      return legends.find(r => p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h);
+    };
+
+    typeCanvas.addEventListener('click', (e)=>{
+      const hit = hitArc(areasType, typeCanvas, e) || hitLegend(areasType, typeCanvas, e);
       if (hit) setFilter('type', hit.key); else clearFilter('type');
-      renderCharts(currentDeals);
+    });
+    sectorCanvas.addEventListener('click', (e)=>{
+      const hit = hitArc(areasSector, sectorCanvas, e) || hitLegend(areasSector, sectorCanvas, e);
+      if (hit) setFilter('sector', hit.key); else clearFilter('sector');
     });
   }
 }
 
-// ---------------- CSV Import/Export ----------------
+// ---------------- CSV Import/Export (unchanged) ----------------
 async function exportCSVs(){
   const [deals, funds, parts] = await Promise.all([loadDeals(), loadFunds(), loadDealFunds()]);
   const fundById = Object.fromEntries(funds.map(f=>[f.id, f]));
@@ -766,6 +777,8 @@ function wireSearchControls(){
       searchQuery = sb.value.trim();
       renderFilterBar();
       renderBoard(filteredDeals(), move, currentFunds, indexDealFunds(currentDealFunds));
+      renderStats(currentDeals);
+      renderCharts(currentDeals);
     });
   }
   if (cs && !cs._wired) {
@@ -774,6 +787,8 @@ function wireSearchControls(){
       searchQuery = ''; sb.value = '';
       renderFilterBar();
       renderBoard(filteredDeals(), move, currentFunds, indexDealFunds(currentDealFunds));
+      renderStats(currentDeals);
+      renderCharts(currentDeals);
     });
   }
   if (ca && !ca._wired) {
@@ -867,4 +882,4 @@ document.addEventListener('DOMContentLoaded', ()=>{
 // Initial load + non-destructive background refresh
 refresh();
 setInterval(()=>{ if(!editing) refresh({ renderBoard:false }); }, 5000);
-// ======================= /Altaris Deal Pipeline — app.js ==========================
+// ======================= /Altaris Deal Pipeline — app.js (clickable legends) ==========================

@@ -21,7 +21,6 @@
     .stat.active { outline:2px solid var(--accent); box-shadow:0 0 0 2px #4ea3ff33 inset; }
     .stat[role="button"] { outline-offset: 2px; }
 
-    /* Board + cards */
     .board { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; padding-bottom: 24px; margin-top: 12px; }
     .col { border: 1px solid var(--line); border-radius: 8px; padding: 8px; background: var(--panel); min-height: 200px; }
     .col b { text-transform: capitalize; font-size: 14px; }
@@ -39,7 +38,6 @@
     .funds { margin-top:8px; padding-top:8px; border-top:1px dashed #444; }
     .fund-row { display:flex; gap:8px; align-items:center; font-size: 13px; flex-wrap: wrap; }
 
-    /* Chips + chip buttons */
     .chip { background:#333; border:1px solid #555; border-radius:999px; padding:2px 8px; }
     .chip-btn { background:#333; border:1px solid #555; color:#fff; border-radius:999px; padding:6px 12px; cursor:pointer; }
     .chip-btn:hover { border-color:#6b7280; filter:none; }
@@ -50,11 +48,9 @@
     .err { color:#ff7b7b; font-size:12px; }
     .ok { color:#9acd32; font-size:12px; }
 
-    /* Unified toolbar */
     #filtersToolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom: 8px; }
     #searchBox { background:#333; color:#fff; border:1px solid #555; border-radius:4px; padding:6px; }
 
-    /* Modal */
     .modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:1000; align-items:center; justify-content:center; }
     .modal.open { display:flex; }
     .modal-card { background:#2a2a2a; color:#f0f0f0; padding:20px; border-radius:8px; width:min(640px, 92vw); max-height:80vh; overflow:auto; box-shadow:0 12px 40px rgba(0,0,0,0.6); }
@@ -64,7 +60,6 @@
     .list-row { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 0; border-bottom:1px solid #3a3a3a; }
     .list-row .meta { font-size:12px; color:#bbb; }
 
-    /* Clip (outlined) + badge */
     .clip-btn { width:34px; height:34px; border-radius:8px; padding:0; display:inline-flex; align-items:center; justify-content:center;
                 background:#25272c; border:1px solid #5a5f69; position:relative; }
     .clip-btn:hover { border-color:var(--accent); box-shadow:0 0 0 2px #4ea3ff33 inset; }
@@ -73,12 +68,15 @@
                   background:var(--accent); color:#0b1220; border:2px solid #1f2937; border-radius:999px;
                   font-size:11px; font-weight:700; line-height:14px; display:none; align-items:center; justify-content:center; }
   </style>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js"></script>
   <script>
     window.DOCS_CHAT_CONFIG = {
       endpoint: "https://volftexuyqyykrnewewa.supabase.co/functions/v1/doc-search",
-      topK: 5
+      topK: 5,
+      // Optional: use a pdf.js proxy route for highlighting (remove if not needed)
+      viewer: "/pdf-viewer"
     };
   </script>
 </head>
@@ -116,13 +114,11 @@
 
     <section class="stats" id="stats"></section>
 
-    <!-- Charts: Deal Type donut (left) + Sector donut (right) -->
     <section class="charts">
       <canvas id="chartType" width="380" height="240"></canvas>
       <canvas id="chartSector" width="380" height="240"></canvas>
     </section>
 
-    <!-- Filters row -->
     <div id="filtersToolbar">
       <div id="filterBar" class="fund-row" style="gap:8px;"></div>
       <input id="searchBox" placeholder="Search deals…" />
@@ -133,7 +129,7 @@
     <section class="board" id="board"></section>
   </div>
 
-  <!-- 📎 Attachment Modal -->
+  <!-- Attachments modal -->
   <div id="attachmentModal" class="modal" aria-hidden="true">
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="attachTitle">
       <h3 id="attachTitle">Attachments</h3>
@@ -148,6 +144,8 @@
   </div>
 
   <script src="/js/doc-ingest-client.js" defer></script>
+  <!-- Load chat.js explicitly so window.openDocChat is available -->
+  <script src="./chat.js" defer></script>
   <script src="./js/chat-launcher.js" defer></script>
   <script src="./app.js"></script>
 </body>

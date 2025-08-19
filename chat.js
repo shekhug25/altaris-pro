@@ -1,7 +1,6 @@
-
-// ========================== Altaris Docs Chat — self-contained chat.js (v10.4) ==========================
+// ========================== Altaris Docs Chat — chat.js (v10.5) ==========================
 (function(){
-  window.DOCS_CHAT_VERSION = 'v10.4';
+  window.DOCS_CHAT_VERSION = 'v10.5';
   let currentDeal = null;
   let currentScope = 'all';
 
@@ -34,6 +33,7 @@
       #chatModal .docs-msg{ background:#151515; border:1px solid #333; border-radius:10px; padding:8px; margin:8px 0; }
       #chatModal .docs-src{ border-top:1px dashed #333; margin-top:6px; padding-top:6px; }
       #chatModal .docs-src h6{ margin:0; font-size:10px; text-transform:uppercase; opacity:.7; }
+      #chatModal .docs-src a{ color:#cfe3ff; text-decoration:underline; }
     `;
     const style = el('style', { id:'docsChatInlineStyles' });
     style.appendChild(document.createTextNode(css));
@@ -66,7 +66,7 @@
     const bar = qs('#docsChatScopeBar');
     if (!bar) return;
 
-    bar.innerHTML = ''; // nuke anything that was there
+    bar.innerHTML = '';
     bar.appendChild(el('span', { style:'opacity:.7; font-size:12px;', innerText:'Scope:' }));
 
     const options = [
@@ -85,7 +85,6 @@
       bar.appendChild(b);
     });
 
-    // After rebuilding, apply current state
     updateScopeUI(currentScope);
   }
 
@@ -110,9 +109,26 @@
       applyActiveStyles(btn, btn.getAttribute('data-scope') === scope);
     });
   }
-  function setScope(scope){
-    currentScope = scope;
-    updateScopeUI(scope);
+  function setScope(scope){ currentScope = scope; updateScopeUI(scope); }
+
+  // Build deep links for citations (uses viewer fallback if configured)
+  function buildCitationLink(c){
+    if (c.link) return c.link;
+    const viewer = (window.DOCS_CHAT_CONFIG && window.DOCS_CHAT_CONFIG.viewer) || '';
+    const file = c.file_url || c.url || '';
+    const page = c.page || c.pg || null;
+    const anchor = c.section_id || c.anchor || '';
+    if (!file) return '#';
+    const isPDF = /\.pdf(\?|#|$)/i.test(file);
+
+    if (isPDF && viewer) {
+      const base = `${viewer}?file=${encodeURIComponent(file)}`;
+      const withPage = page ? `${base}&page=${page}` : base;
+      const q = (c.quote || c.heading || c.snippet || '').slice(0,80);
+      return q ? `${withPage}&search=${encodeURIComponent(q)}` : withPage;
+    }
+    if (isPDF) return page ? `${file}#page=${page}` : file;
+    return anchor ? `${file}#${anchor}` : file;
   }
 
   function pushMessage(role, content, citations){
@@ -120,18 +136,31 @@
     const container = qs('#chatMessages'); if (!container) return;
     if (!container._inited){ container.innerHTML = ''; container._inited = true; }
     const bubble = el('div', { className:'docs-msg' }, [
-      el('div', { style:'font-size:13px; white-space:pre-wrap;', innerText: content })
+      el('div', { style:'font-size:13px; white-space:pre-wrap;' }, [content || ''])
     ]);
+
     if (Array.isArray(citations) && citations.length){
       const srcWrap = el('div', { className:'docs-src' }, [ el('h6', { innerText:'Sources' }) ]);
-      citations.forEach(c=>{
-        srcWrap.appendChild(
-          el('div', { style:'font-size:12px; margin-top:4px;' }, [
-            el('b', { innerText: c.title || 'Document' }),
-            c.page? el('span', { style:'margin-left:6px; font-size:12px; opacity:.7;', innerText:'p.'+c.page }): null,
-            el('div', { style:'font-size:12px; margin-top:2px;', innerText: (c.snippet||'').slice(0,220) + ((c.snippet||'').length>220?'…':'') })
-          ])
-        );
+      citations.forEach((c, idx)=>{
+        const href = buildCitationLink(c);
+        const title = c.title || c.heading || 'Document';
+        const pageStr = c.page ? ` · p.${c.page}` : '';
+        const row = el('div', { style:'font-size:12px; margin-top:4px;' });
+
+        const link = el('a', { href: href || '#', target: '_blank', rel: 'noopener',
+          innerText: `[${idx+1}] ${title}${pageStr}`, style: 'display:inline-block;' });
+
+        const copyBtn = el('button', { className: 'docs-chip', type: 'button',
+          style: 'margin-left:8px; padding:2px 6px; font-size:11px;', innerText: 'Copy link' });
+        copyBtn.onclick = (e)=>{ e.preventDefault(); const url = link.href || ''; if(!url || url==='#') return;
+          navigator.clipboard && navigator.clipboard.writeText(url); copyBtn.innerText='Copied!';
+          setTimeout(()=> copyBtn.innerText='Copy link', 1200); };
+
+        const snippet = el('div', { style:'font-size:12px; margin-top:2px; opacity:.9;',
+          innerText: (c.snippet||'').slice(0,220) + ((c.snippet||'').length>220?'…':'') });
+
+        row.appendChild(link); row.appendChild(copyBtn); row.appendChild(snippet);
+        srcWrap.appendChild(row);
       });
       bubble.appendChild(srcWrap);
     }
@@ -144,10 +173,7 @@
     const container = qs('#chatMessages'); if (!container) return;
     let n = qs('#chatTyping');
     if (on){
-      if (!n){
-        n = el('div', { id:'chatTyping', style:'margin:6px 0; font-size:12px; opacity:.7;' , innerText:'Analyzing relevant documents…' });
-        container.appendChild(n);
-      }
+      if (!n){ n = el('div', { id:'chatTyping', style:'margin:6px 0; font-size:12px; opacity:.7;' , innerText:'Analyzing relevant documents…' }); container.appendChild(n); }
     } else if (n){ n.remove(); }
     container.scrollTop = container.scrollHeight;
   }
@@ -158,16 +184,13 @@
     const topK = cfg.topK || 5;
     const headers = Object.assign({ 'Content-Type': 'application/json' }, cfg.headers || {});
     try{
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ query, dealId, dealName: currentDeal?.name, scope, topK })
-      });
+      const res = await fetch(endpoint, { method: 'POST', headers, body: JSON.stringify({ query, dealId, dealName: currentDeal?.name, scope, topK }) });
       if (!res.ok) throw new Error('HTTP '+res.status);
       const data = await res.json();
       if (!data || typeof data.answer !== 'string') throw new Error('Malformed response');
       return { text: data.answer, citations: Array.isArray(data.citations)? data.citations : [] };
     }catch(err){
+      console.error('[docs-chat] fetch error:', err);
       return {
         text: "I couldn’t reach the search endpoint (see console for details), so here’s a placeholder answer. Configure window.DOCS_CHAT_CONFIG.endpoint/headers to enable real search.",
         citations: [{ title:"Example — Credit Memo.pdf", snippet:"This is a placeholder snippet — wire your Edge Function to return real excerpts.", page:1 }]
@@ -200,11 +223,8 @@
         pushMessage('assistant', 'Sorry — something went wrong retrieving an answer.');
       }
     };
-    input.addEventListener('keydown', (e)=>{
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase()==='enter'){ send.click(); }
-    });
+    input.addEventListener('keydown', (e)=>{ if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase()==='enter'){ send.click(); } });
 
-    // Close on overlay or X
     modalEl.addEventListener('click', (e)=>{
       const isOverlay = (e.target === modalEl);
       const closeBtn = e.target.closest && e.target.closest('[data-action="close"]');
@@ -214,15 +234,9 @@
 
   window.openDocChat = function(deal){
     currentDeal = deal;
-    ensureModal();
-    setTitle();
-    rebuildScopeBar();      // <-- forcibly rebuild scope chips every time
-    setScope('all');        // default selection visual
-    const container = qs('#chatMessages');
-    if (container){ container._inited = false; container.innerHTML = 'Ask a question about this deal’s documents…'; }
+    ensureModal(); setTitle(); rebuildScopeBar(); setScope('all');
+    const container = qs('#chatMessages'); if (container){ container._inited = false; container.innerHTML = 'Ask a question about this deal’s documents…'; }
     const input = qs('#chatInput'); if (input){ input.value = ''; input.focus(); }
-    openModal();
-    wireControls();
+    openModal(); wireControls();
   };
 })();
-// ======================= /Altaris Docs Chat — self-contained chat.js (v10.4) ==========================

@@ -561,12 +561,20 @@ function DealCard(d, onMove, funds, dealFundsMap){
   const badge = el("div", { id:`clip-badge-${d.id}`, className:"clip-badge", innerText:"0" });
   attachBtn.appendChild(badge);
 
-  // chat bubble SVG (stroke-only, matching clip style)
+
+       
+
+     // chat bubble SVG
   const chatSVG = '<svg class="clip-svg" viewBox="0 0 24 24" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" fill="none"><path d="M21 12a8.5 8.5 0 01-8.5 8.5c-1.52 0-2.95-.38-4.2-1.06L3 21l1.63-4.16A8.47 8.47 0 013.5 12 8.5 8.5 0 1112 20.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const chatBtn = el("button", { className:"clip-btn", title:"Chat", innerHTML:chatSVG });
   chatBtn.setAttribute('data-action','chat');
   chatBtn.setAttribute('data-deal-id', d.id);
   chatBtn.setAttribute('data-deal-name', d.name);
+
+  // NEW: open chat modal for this deal
+  chatBtn.onclick = () => window.openDocChat && window.openDocChat(d);
+
+    
 
   const card = el("div", { className:"card" }, [
     el("div", { className:"card-header" }, [

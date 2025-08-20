@@ -4,6 +4,11 @@ if (!window.DEMO_MODE) {
   client = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
 }
 const DEMO_KEY = 'altaris-demo-data-v-pro';
+window.altarisLogout = async function(){ 
+  try { if (window.client && window.client.auth) { await window.client.auth.signOut(); } } catch(e){ console.warn('logout error', e); } 
+  try { localStorage.clear(); sessionStorage.clear(); } catch(e){}
+  window.location.href = "index.html";
+};
 console.log(`[Altaris] Mode=${window.DEMO_MODE ? 'DEMO' : (client ? 'SUPABASE' : 'NO_CLIENT')}`);
 
 let editing=false, editTimer=null;
@@ -891,3 +896,13 @@ document.addEventListener('DOMContentLoaded', ()=>{
 refresh();
 setInterval(()=>{ if(!editing) refresh({ renderBoard:false }); }, 5000);
 // ======================= /Altaris Deal Pipeline — app.js (clickable legends) ==========================
+
+// Robust delegation: if #logoutBtn exists or is added later, clicking it will log out.
+function altarisLogoutDelegation(e){
+  const t = e.target;
+  if (t && (t.id === 'logoutBtn' || t.closest && t.closest('#logoutBtn'))) {
+    e.preventDefault();
+    if (window.altarisLogout) window.altarisLogout();
+  }
+}
+document.addEventListener('click', altarisLogoutDelegation);

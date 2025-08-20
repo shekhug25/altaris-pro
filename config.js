@@ -1,3 +1,5 @@
 // Paste your Supabase project values here:
 window.SUPABASE_URL = "https://volftexuyqyykrnewewa.supabase.co";
 window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZvbGZ0ZXh1eXF5eWtybmV3ZXdhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ2MzYwMjIsImV4cCI6MjA3MDIxMjAyMn0.0P9JRImADmFDtZyfdxnVG6mMaT7tBoy_0qCDSppwj3U";
+window.DEMO_MODE = false;   // true = bypass auth (local demos), false = enforce login
+

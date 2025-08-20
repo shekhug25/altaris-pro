@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <title>Altaris — Admin</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="./config.js"></script>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#0f172a;color:#e5e7eb;margin:0;display:flex;justify-content:center;padding:28px}
+    .wrap{width:min(900px,94vw)}
+    .card{background:#111827;border:1px solid #1f2937;border-radius:10px;padding:16px;margin-bottom:16px}
+    h2{margin:0 0 12px;font-size:18px}
+    input,select{background:#0b1220;border:1px solid #374151;color:#e5e7eb;border-radius:8px;padding:8px}
+    button{background:#4ea3ff;color:#0b1220;border:0;border-radius:8px;padding:10px 12px;font-weight:700;cursor:pointer}
+    table{width:100%;border-collapse:collapse;margin-top:10px}
+    th,td{border-bottom:1px solid #1f2937;padding:8px;text-align:left;font-size:14px}
+    .row{display:flex;gap:8px;flex-wrap:wrap}
+    .ghost{background:#1f2937;color:#e5e7eb;border:1px solid #374151}
+    .msg{font-size:13px;margin-top:8px;min-height:18px}
+    .note{font-size:12px;color:#9ca3af}
+    .right{margin-left:auto}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="row">
+      <h2 style="margin-right:auto">Admin — Allowlist & Invites</h2>
+      <div id="who" class="note"></div>
+      <button class="ghost" onclick="logout()" title="Sign out">Logout</button>
+      <a href="index.html" class="ghost" style="text-decoration:none;display:inline-flex;align-items:center;padding:10px 12px;border-radius:8px;margin-left:6px">← Back to app</a>
+    </div>
+    <div id="adminGuard" class="msg"></div>
+  </div>
+
+  <!-- ADMIN-ONLY PANELS -->
+  <div id="adminPanels" style="display:none">
+    <div class="card">
+      <h2>Add/Update Allowlist</h2>
+      <div class="row">
+        <input id="alEmail" type="email" placeholder="user@yourco.com" style="min-width:260px"/>
+        <input id="alOrg" placeholder="Org name (e.g., Altaris)"/>
+        <button onclick="addAllowlist()">Add/Update</button>
+      </div>
+      <div class="msg" id="alMsg"></div>
+    </div>
+
+    <div class="card">
+      <h2>Current Allowlist</h2>
+      <div class="row">
+        <button class="ghost" onclick="loadList()">Refresh</button>
+      </div>
+      <table id="alTable">
+        <thead><tr><th>Email</th><th>Org</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>Invite User</h2>
+      <div class="row">
+        <input id="inviteEmail" type="email" placeholder="user@yourco.com" style="min-width:260px"/>
+        <button onclick="sendInvite()">Send Invite</button>
+      </div>
+      <div class="msg" id="inviteMsg"></div>
+      <div class="note">User must be in allowlist (email → org) before you invite.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const sb = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+const FBASE = window.SUPABASE_URL + "/functions/v1";
+
+async function logout(){ await sb.auth.signOut(); location.href="index.html"; }
+
+async function ensureAdmin(){
+  const { data: { session } } = await sb.auth.getSession();
+  if(!session){ location.href="index.html"; return; }
+  document.getElementById('who').textContent = session.user.email;
+
+  // Verify admin by calling allowlist-list
+  const res = await fetch(FBASE + "/allowlist-list", {
+    headers: { "Authorization":"Bearer "+session.access_token, "apikey": window.SUPABASE_ANON_KEY }
+  });
+
+  if (res.status === 403 || res.status === 401) {
+    document.getElementById('adminGuard').textContent =
+      "You are not an admin. Ask an admin to add your email to the admins table.";
+    document.getElementById('adminPanels').style.display = "none";
+    return;
+  }
+
+  if (!res.ok){
+    document.getElementById('adminGuard').textContent = "Error: " + await res.text();
+    document.getElementById('adminPanels').style.display = "none";
+    return;
+  }
+
+  // Success → show panels
+  document.getElementById('adminPanels').style.display = "block";
+  const { items } = await res.json();
+  renderTable(items);
+}
+
+function renderTable(items){
+  const tbody = document.querySelector("#alTable tbody");
+  tbody.innerHTML = "";
+  (items||[]).forEach(row=>{
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${row.email}</td><td>${row.org_id||''}</td>
+      <td><button class="ghost" data-email="${row.email}">Remove</button></td>`;
+    tr.querySelector("button").onclick = ()=> removeAllowlist(row.email);
+    tbody.appendChild(tr);
+  });
+}
+
+async function loadList(){
+  const { data: { session } } = await sb.auth.getSession();
+  const res = await fetch(FBASE + "/allowlist-list", {
+    headers: { "Authorization":"Bearer "+session.access_token, "apikey": window.SUPABASE_ANON_KEY }
+  });
+  const txt = await res.text();
+  if(!res.ok){ alert("Error: " + txt); return; }
+  renderTable(JSON.parse(txt).items);
+}
+
+async function addAllowlist(){
+  const email = document.getElementById("alEmail").value.trim().toLowerCase();
+  const org_name = document.getElementById("alOrg").value.trim();
+  const msg = document.getElementById("alMsg");
+  if(!email || !org_name){ msg.textContent = "Enter email and org name"; return; }
+  const { data: { session } } = await sb.auth.getSession();
+  const res = await fetch(FBASE + "/allowlist-add", {
+    method:"POST",
+    headers: { "Content-Type":"application/json", "Authorization":"Bearer "+session.access_token, "apikey": window.SUPABASE_ANON_KEY },
+    body: JSON.stringify({ email, org_name })
+  });
+  const txt = await res.text();
+  msg.textContent = res.ok ? "Allowlist updated ✅" : "Error: " + txt;
+  if(res.ok) loadList();
+}
+
+async function removeAllowlist(email){
+  const { data: { session } } = await sb.auth.getSession();
+  const res = await fetch(FBASE + "/allowlist-remove", {
+    method:"POST",
+    headers: { "Content-Type":"application/json", "Authorization":"Bearer "+session.access_token, "apikey": window.SUPABASE_ANON_KEY },
+    body: JSON.stringify({ email })
+  });
+  const txt = await res.text();
+  if(!res.ok){ alert("Error: " + txt); return; }
+  loadList();
+}
+
+async function sendInvite(){
+  const email = document.getElementById("inviteEmail").value.trim().toLowerCase();
+  const msg = document.getElementById("inviteMsg");
+  if(!email){ msg.textContent = "Enter an email"; return; }
+  const { data: { session } } = await sb.auth.getSession();
+  const res = await fetch(FBASE + "/auth-invite", {
+    method:"POST",
+    headers: { "Content-Type":"application/json", "Authorization":"Bearer "+session.access_token, "apikey": window.SUPABASE_ANON_KEY },
+    body: JSON.stringify({ email })
+  });
+  const txt = await res.text();
+  msg.textContent = res.ok ? "Invite sent ✅" : "Error: " + txt;
+}
+
+ensureAdmin().catch(()=>{/* not admin; panels hidden */});
+</script>
+</body>
+</html>

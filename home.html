@@ -76,13 +76,13 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js"></script>
   <script>
-    window.DOCS_CHAT_CONFIG = {
-      endpoint: "https://volftexuyqyykrnewewa.supabase.co/functions/v1/doc-search",
-      topK: 5,
-      // Optional: use a pdf.js proxy route for highlighting (remove if not needed)
-      viewer: "/pdf-viewer"
-    };
-  </script>
+  window.DOCS_CHAT_CONFIG = {
+    endpoint: "https://volftexuyqyykrnewewa.supabase.co/functions/v1/doc-search",
+    topK: 5,
+    // Use Mozilla-hosted pdf.js viewer (stable) to avoid CDN 404s
+    viewer: "https://mozilla.github.io/pdf.js/web/viewer.html"
+  };
+</script>
 </head>
 <body>
   <header>

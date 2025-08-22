@@ -559,9 +559,14 @@ function DealCard(d, onMove, funds, dealFundsMap){
   const rejectReason = el("input", { id:`reject-${d.id}`, value: d.data?.reject_reason || "", placeholder:"Reject reason..." });
   const docs = el("input", { type:"checkbox", id:`docs-${d.id}`, checked: !!d.data?.docs_executed });
   const fundsSettled = el("input", { type:"checkbox", id:`funds-${d.id}`, checked: !!d.data?.funds_settled });
+    
 
   // outlined paperclip SVG (pro)
   const clipSVG = '<svg class="clip-svg" viewBox="0 0 24 24" aria-hidden="true"><path d="M21.44 11.05l-8.49 8.49a5.5 5.5 0 11-7.78-7.78l9.19-9.19a3.5 3.5 0 014.95 4.95l-9.9 9.9a1.5 1.5 0 11-2.12-2.12l8.49-8.49" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const editBtn = el("button", { className:"clip-btn", title:"Edit deal" }, [
+el("span", { innerHTML:"✏️" })
+]);
+editBtn.onclick = ()=> openEditDealModal(d);
   const attachBtn = el("button", { className:"clip-btn", title:"Manage attachments", innerHTML:clipSVG, onclick: ()=> openAttachmentsModal(d) });
   const badge = el("div", { id:`clip-badge-${d.id}`, className:"clip-badge", innerText:"0" });
   attachBtn.appendChild(badge);
@@ -579,12 +584,11 @@ function DealCard(d, onMove, funds, dealFundsMap){
   // NEW: open chat modal for this deal
   chatBtn.onclick = () => window.openDocChat && window.openDocChat(d);
 
-    
 
   const card = el("div", { className:"card" }, [
     el("div", { className:"card-header" }, [
       el("div", { innerHTML:`<b>${d.name}</b>` }),
-      el("div", { style:"display:flex; gap:6px; align-items:center;" }, [attachBtn, chatBtn])
+      el("div", { style:"display:flex; gap:6px; align-items:center;" }, [attachBtn, chatBtn, editBtn])
     ]),
     el("div", { innerText:`Source: ${d.source||""}` }),
     el("div", { innerText:`Type: ${d.deal_type||""}` }),
@@ -607,6 +611,54 @@ function DealCard(d, onMove, funds, dealFundsMap){
   attachEditHandlers(card);
   return card;
 }
+
+// ---- Edit Deal Modal Logic ----
+let currentEditDeal = null;
+function openEditDealModal(deal){
+currentEditDeal = deal;
+document.getElementById('edit-id').value = deal.id;
+document.getElementById('edit-name').value = deal.name || '';
+document.getElementById('edit-stage').innerHTML = STAGE_ORDER.map(s =>
+`<option value="${s}" ${deal.stage===s?'selected':''}>${stageLabel(s)}</option>`).join('');
+document.getElementById('edit-type').value = deal.deal_type || '';
+document.getElementById('edit-source').value = deal.source || '';
+document.getElementById('edit-currency').value = deal.currency || 'USD';
+document.getElementById('edit-size').value = deal.size || '';
+document.getElementById('edit-sector').value = deal.sector || '';
+document.getElementById('editDealModal').classList.add('open');
+}
+
+
+function closeEditDealModal(){
+currentEditDeal = null;
+document.getElementById('editDealModal').classList.remove('open');
+}
+
+
+async function saveEditDeal(){
+if(!currentEditDeal) return;
+const patch = {
+id: currentEditDeal.id,
+name: document.getElementById('edit-name').value.trim(),
+stage: document.getElementById('edit-stage').value,
+deal_type: document.getElementById('edit-type').value.trim(),
+source: document.getElementById('edit-source').value.trim(),
+currency: document.getElementById('edit-currency').value.trim(),
+size: parseFloat(document.getElementById('edit-size').value||'0'),
+sector: document.getElementById('edit-sector').value.trim()
+};
+beginEdit();
+const saved = await updateDeal(patch);
+editing = false;
+if(saved) refresh();
+closeEditDealModal();
+}
+
+
+document.addEventListener('DOMContentLoaded', ()=>{
+document.getElementById('editCancelBtn').onclick = closeEditDealModal;
+document.getElementById('editSaveBtn').onclick = saveEditDeal;
+});
 function renderBoard(deals, onMove, funds, dealFundsMap){
   const stages = STAGE_ORDER;
   const board = qs("#board"); board.innerHTML = "";

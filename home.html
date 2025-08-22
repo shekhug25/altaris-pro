@@ -76,13 +76,67 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="./config.js"></script>
   <script>
-  window.DOCS_CHAT_CONFIG = {
-    endpoint: "https://volftexuyqyykrnewewa.supabase.co/functions/v1/doc-search",
-    topK: 5,
-    // Use Mozilla-hosted pdf.js viewer (stable) to avoid CDN 404s
-    viewer: "https://mozilla.github.io/pdf.js/web/viewer.html"
-  };
-</script>
+    window.DOCS_CHAT_CONFIG = {
+      endpoint: "https://volftexuyqyykrnewewa.supabase.co/functions/v1/doc-search",
+      topK: 5,
+      // Optional: use a pdf.js proxy route for highlighting (remove if not needed)
+      viewer: "/pdf-viewer"
+    };
+  </script>
+<style id="kanban-v8-styles">
+  :root { --panel:#151515; --line:#2a2a2a; --fg:#e6e6e6; --muted:#a0aec0; --accent:#2b6cb0; --good:#38a169; }
+  /* Board & columns */
+  .board { display:grid; grid-auto-flow:column; gap:16px; align-items:start; padding:8px 8px 24px; overflow-x:auto; }
+  .board .col { min-width:340px; max-width:420px; display:flex; flex-direction:column; gap:10px;
+    transition: width .2s ease, min-width .2s ease, max-width .2s ease; }
+  /* Collapsed columns = slim rail */
+  .board .col.collapsed { width:56px !important; min-width:56px !important; max-width:56px !important; }
+  .board .col.collapsed > *:not(.col-head) { display:none !important; }
+  /* Sticky column header */
+  .col .col-head {
+    position:sticky; top:0; z-index:2;
+    display:grid; grid-template-columns:auto 1fr auto; align-items:center; column-gap:10px;
+    background:var(--panel); border:1px solid var(--line); border-bottom:0;
+    padding:10px 10px; border-radius:10px 10px 0 0;
+    backdrop-filter:saturate(110%) blur(6px);
+  }
+  .col .col-head .title { font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--fg); }
+  .col .col-head .stats { display:inline-flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+  .col .col-head .stat {
+    display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px;
+    background:#1a2433; color:#e6f0ff; border:1px solid #2f4b7c; font-size:12px;
+  }
+  .col .col-head .stat .num { font-weight:800; font-size:13px; }
+  .col .col-head .stat.money { background:#182a1d; color:#eaffea; border-color:#2d5a37; }
+  .col .col-head .stat.money .num { color:#9ef0b8; }
+  .col .col-head .stat.deals .num { color:#b6d0ff; }
+  .col .col-head .collapse-btn {
+    width:26px; height:26px; border-radius:8px; border:1px solid var(--line);
+    background:#1c1c1c; color:#ddd; display:inline-flex; align-items:center; justify-content:center; cursor:pointer;
+    transition: transform .15s ease, background .15s ease;
+  }
+  .col .col-head .collapse-btn:hover { background:#232323; }
+  .col .col-head .collapse-btn:before { content:"›"; font-size:14px; display:inline-block; }
+  .col.collapsed .col-head { grid-template-columns:1fr; justify-items:center; padding:12px 4px; }
+  .col.collapsed .col-head .stats { display:none; }
+  .col.collapsed .col-head .title { writing-mode:vertical-rl; transform:rotate(180deg); text-align:center; font-size:12px; opacity:.9; }
+  .col.collapsed .col-head .collapse-btn { transform:rotate(180deg); }
+  /* Cards */
+  .col .card { border-radius:12px; }
+  /* Collapsed tiles (cards) */
+  .card.is-collapsed { padding:8px !important; }
+  .card.is-collapsed > :not(.card-summary) { display:none !important; }
+  .card .card-summary { display:flex; align-items:center; gap:8px; margin:2px 0 0; }
+  .card .card-summary .ttl { font-weight:600; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  /* Quick icon controls above board (left) */
+  .kanban-quick-controls{ display:flex; gap:8px; align-items:center; margin:8px 0 8px 8px; }
+  .kanban-quick-controls .icon-btn{
+    width:28px; height:28px; border-radius:8px; border:1px solid var(--line);
+    background:#1c1c1c; color:#e6e6e6; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;
+  }
+  .kanban-quick-controls .icon-btn:hover{ background:#232323; }
+  .kanban-quick-controls .sep{ width:8px; height:1px; background:transparent; }
+</style>
 </head>
 <body>
   <header>
@@ -155,5 +209,153 @@
   <script src="./chat.js" defer></script>
   <script src="./js/chat-launcher.js" defer></script>
   <script src="./app.js"></script>
+<script id="kanban-v8-scripts">
+(function(){
+  // Helpers
+  const $  = (s, el=document)=> el.querySelector(s);
+  const $$ = (s, el=document)=> Array.from(el.querySelectorAll(s));
+  const throttle = (fn, wait=50)=>{ let t=null; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), wait); }; };
+
+  // Currency normalization
+  const DEFAULT_RATES = { USD:1, EUR:1.09, GBP:1.27 };
+  const getRates = ()=> Object.assign({}, DEFAULT_RATES, (window.KANBAN_CURRENCY_RATES||{}));
+  const unitMultiplier = (u)=>{
+    if(!u) return 1; const v=String(u).toLowerCase();
+    if(v==='k') return 1e3; if(v==='m'||v==='mm'||v==='mn') return 1e6; if(v==='b'||v==='bn') return 1e9; return 1;
+  };
+  const detectCcy = (tok)=>{
+    if(!tok) return 'USD'; tok=String(tok).trim();
+    if(tok==='€') return 'EUR'; if(tok==='£') return 'GBP'; if(tok==='$') return 'USD';
+    tok=tok.toUpperCase(); if(['USD','EUR','GBP'].includes(tok)) return tok; return 'USD';
+  };
+  const parseAmountAndCurrency = (text)=>{
+    if(!text) return {amt:0, ccy:'USD'};
+    const s = String(text).replace(/\s+/g,' ').trim();
+    // 1) Total Committed: [USD|EUR|GBP|$|€|£]? N.N [k|m|b|mm|mn|bn]
+    let m = s.match(/Total\s*Committed[^\d$€£A-Z]*([$€£]|USD|EUR|GBP)?\s*([\d.,]+)\s*([KkMmBb](?:[NnMm])?)/i);
+    if(m){ const c=detectCcy(m[1]||'USD'); const n=parseFloat((m[2]||'0').replace(/,/g,''))||0; const mult=unitMultiplier(m[3]); return {amt:n*mult, ccy:c}; }
+    // 2) Any currency token + number + unit
+    m = s.match(/(USD|EUR|GBP|[$€£])\s*([\d.,]+)\s*([KkMmBb](?:[NnMm])?)/i);
+    if(m){ const c=detectCcy(m[1]); const n=parseFloat((m[2]||'0').replace(/,/g,''))||0; const mult=unitMultiplier(m[3]); return {amt:n*mult, ccy:c}; }
+    return {amt:0, ccy:'USD'};
+  };
+  const toUSD = (amt, ccy, rates)=> (rates[ccy]||1)*amt;
+  const formatShortUSD = (n)=> n>=1e12? '$'+(n/1e12).toFixed(2).replace(/\.0+$/,'')+'T'
+    : n>=1e9 ? '$'+(n/1e9 ).toFixed(2).replace(/\.0+$/,'')+'B'
+    : n>=1e6 ? '$'+(n/1e6 ).toFixed(2).replace(/\.0+$/,'')+'M'
+    : n>=1e3 ? '$'+(n/1e3 ).toFixed(2).replace(/\.0+$/,'')+'K'
+    : '$'+Math.round(n);
+
+  // Commitment detection per card
+  const commitmentFromCard = (card)=>{
+    const dataAttr = (card.getAttribute('data-committed') || card.dataset?.committed || '').trim();
+    if (dataAttr) return parseAmountAndCurrency(dataAttr);
+    const node = $$( '*', card ).find(n => /Total\s*Committed/i.test(n.textContent||''));
+    if (node) return parseAmountAndCurrency(node.textContent||'');
+    return parseAmountAndCurrency(card.textContent||'');
+  };
+
+  // Column header creation / refresh
+  const ensureColHead = (col)=>{
+    let head = $('.col-head', col);
+    if (head) return head;
+    head = document.createElement('div'); head.className='col-head';
+    const title = document.createElement('div'); title.className='title';
+    const stats = document.createElement('div'); stats.className='stats';
+    const deals = document.createElement('div'); deals.className='stat deals'; deals.innerHTML='<span class="num">0</span> deals';
+    const money = document.createElement('div'); money.className='stat money'; money.innerHTML='<span class="num">—</span> total';
+    const btn = document.createElement('button'); btn.className='collapse-btn'; btn.title='Collapse';
+    stats.appendChild(deals); stats.appendChild(money);
+    head.appendChild(title); head.appendChild(stats); head.appendChild(btn);
+    const label = col.querySelector('b, .col-title, h3');
+    const t = (label?label.textContent:col.getAttribute('data-title')||'').trim() || 'Column';
+    title.textContent = t;
+    if (label && label.parentNode===col){ col.insertBefore(head, label); label.remove(); } else { col.insertBefore(head, col.firstChild); }
+    const setCollapsed = (on)=>{
+      col.classList.toggle('collapsed', !!on);
+      btn.setAttribute('aria-expanded', (!on).toString());
+      try{ const store=JSON.parse(localStorage.getItem('kanbanCollapsed')||'{}'); store[t]=!!on; localStorage.setItem('kanbanCollapsed', JSON.stringify(store)); }catch{}
+    };
+    btn.addEventListener('click', ()=> setCollapsed(!col.classList.contains('collapsed')));
+    head.addEventListener('dblclick', ()=> setCollapsed(!col.classList.contains('collapsed')));
+    try{ const store=JSON.parse(localStorage.getItem('kanbanCollapsed')||'{}'); if(store[t]) setCollapsed(true); }catch{}
+    return head;
+  };
+  const refreshCol = (col)=>{
+    const head = ensureColHead(col);
+    const cards = $$('.card', col);
+    const count = cards.length;
+    const rates = getRates();
+    let sumUSD = 0; cards.forEach(c=>{ const {amt, ccy} = commitmentFromCard(c); sumUSD += toUSD(amt, ccy, rates); });
+    const dealsNum = $('.stat.deals .num', head); if (dealsNum) dealsNum.textContent = String(count);
+    const moneyNum = $('.stat.money .num', head); if (moneyNum) moneyNum.textContent = sumUSD>0 ? ('≈'+formatShortUSD(sumUSD)) : '—';
+  };
+  const refreshAll = ()=>{ const board = $('.board') || $('#board'); if(!board) return; $$('.col', board).forEach(refreshCol); };
+
+  // Tiles collapse
+  const getDealTitle = (card)=>{
+    const sel = card.querySelector('[data-deal-name], .deal-title, .card-title, .title h4, h4.title, h3.title, h4, h3, b, strong');
+    if (sel && sel.textContent) return sel.textContent.trim();
+    const txt = (card.textContent||'').split('\n').map(s=>s.trim()).filter(Boolean)[0] || 'Deal';
+    return txt.slice(0,80);
+  };
+  const ensureCardSummary = (card)=>{
+    let sum = $('.card-summary', card);
+    if (!sum){ sum = document.createElement('div'); sum.className='card-summary'; card.insertBefore(sum, card.firstChild); }
+    let ttl = $('.ttl', sum); if(!ttl){ ttl = document.createElement('div'); ttl.className='ttl'; sum.appendChild(ttl); }
+    ttl.textContent = getDealTitle(card);
+    return sum;
+  };
+  const collapseTilesAll = ()=>{
+    $$('.board .col .card').forEach(card => { ensureCardSummary(card); card.classList.add('is-collapsed'); });
+    try{ localStorage.setItem('kanbanTilesCollapsed','1'); }catch{}
+    refreshAll();
+  };
+  const expandTilesAll = ()=>{
+    $$('.board .col .card').forEach(card => { card.classList.remove('is-collapsed'); const s=$('.card-summary', card); if(s) s.remove(); });
+    try{ localStorage.setItem('kanbanTilesCollapsed','0'); }catch{}
+    refreshAll();
+  };
+
+  // Quick controls (icons) above board
+  const mountControls = ()=>{
+    const board = $('.board, #board'); if(!board) return;
+    // Remove any legacy toolbar
+    $$('.kanban-toolbar').forEach(n=>n.remove());
+    // Prevent duplicates
+    if (board.previousElementSibling && board.previousElementSibling.classList && board.previousElementSibling.classList.contains('kanban-quick-controls')) return;
+    const bar = document.createElement('div'); bar.className='kanban-quick-controls';
+    const btnColCollapse = document.createElement('button'); btnColCollapse.className='icon-btn'; btnColCollapse.title='Collapse columns'; btnColCollapse.textContent='≪';
+    const btnColExpand   = document.createElement('button'); btnColExpand.className='icon-btn'; btnColExpand.title='Expand columns';   btnColExpand.textContent='≫';
+    const spacer         = document.createElement('span');   spacer.className='sep';
+    const btnTileCollapse= document.createElement('button'); btnTileCollapse.className='icon-btn'; btnTileCollapse.title='Collapse tiles';  btnTileCollapse.textContent='▥';
+    const btnTileExpand  = document.createElement('button'); btnTileExpand.className='icon-btn'; btnTileExpand.title='Expand tiles';    btnTileExpand.textContent='▤';
+    btnColCollapse.onclick = ()=>{ $$('.board .col').forEach(col=>{ col.classList.add('collapsed'); }); try{ const store={}; $$('.board .col .col-head .title').forEach(t=>store[t.textContent]=true); localStorage.setItem('kanbanCollapsed', JSON.stringify(store)); }catch{} };
+    btnColExpand.onclick   = ()=>{ $$('.board .col').forEach(col=>{ col.classList.remove('collapsed'); }); try{ const store={}; $$('.board .col .col-head .title').forEach(t=>store[t.textContent]=false); localStorage.setItem('kanbanCollapsed', JSON.stringify(store)); }catch{} };
+    btnTileCollapse.onclick= collapseTilesAll;
+    btnTileExpand.onclick  = expandTilesAll;
+    bar.appendChild(btnColCollapse); bar.appendChild(btnColExpand); bar.appendChild(spacer); bar.appendChild(btnTileCollapse); bar.appendChild(btnTileExpand);
+    board.parentNode.insertBefore(bar, board);
+    // Restore tiles state
+    try{ if (localStorage.getItem('kanbanTilesCollapsed')==='1') collapseTilesAll(); }catch{}
+  };
+
+  // Public API (optional)
+  window.KANBAN_STATS = { refreshAll, parseAmountAndCurrency, commitmentFromCard, getRates };
+
+  // Enhance on load + observe for dynamic renders
+  document.addEventListener('DOMContentLoaded', ()=>{
+    const board = document.querySelector('.board, #board');
+    if (!board) return;
+    // Initial pass
+    refreshAll(); mountControls();
+    // Mutation observer to keep stats fresh and ensure headers exist
+    const obs = new MutationObserver(throttle(()=>{ $$('.col', board).forEach(ensureColHead); refreshAll(); }, 50));
+    obs.observe(board, { childList:true, subtree:true });
+    // Safety net
+    window.addEventListener('load', ()=>{ $$('.col', board).forEach(ensureColHead); refreshAll(); });
+  });
+})();
+</script>
 </body>
 </html>
